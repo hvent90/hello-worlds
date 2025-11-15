@@ -122,6 +122,15 @@ CLion has built-in CMake support, making the build process very simple:
    - You can create Debug/Release build profiles
    - Default build directory: `cmake-build-debug` or `cmake-build-release`
 
+5. **Troubleshooting**
+
+   If CLion doesn't detect CMakeLists.txt automatically:
+   - Make sure you opened the `planet-renderer-c` folder directly (not the root `hello-worlds` folder)
+   - Right-click on `CMakeLists.txt` → "Load CMake Project"
+   - Or: File → Settings → Build, Execution, Deployment → Toolchains → Make sure a toolchain is selected
+   - Or: View → Tool Windows → CMake → Click the reload button (circular arrows icon)
+   - Check the CMake tab (bottom of window) for error messages about missing toolchain/compiler
+
 ## Controls
 
 - **WASD + Mouse**: Move camera
