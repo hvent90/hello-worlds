@@ -1,4 +1,5 @@
 #include "chunk.h"
+#include <raymath.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -77,23 +78,26 @@ void GenerateInitialHeights(ChunkProps props, float** outPositions, float** outC
 
 // Generate triangle indices
 void GenerateIndices(int resolution, unsigned int** outIndices, int* outIndexCount) {
-    int effectiveResolution = resolution + 2;
-    int indexCount = effectiveResolution * effectiveResolution * 6;
+    // Grid dimensions: (resolution + 2) x (resolution + 2) vertices
+    // Number of quads: (resolution + 1) x (resolution + 1)
+    int gridSize = resolution + 2;  // Number of vertices per side
+    int quadCount = resolution + 1; // Number of quads per side
+    int indexCount = quadCount * quadCount * 6;
     *outIndices = (unsigned int*)malloc(indexCount * sizeof(unsigned int));
     *outIndexCount = indexCount;
 
     int idx = 0;
-    for (int i = 0; i < effectiveResolution; i++) {
-        for (int j = 0; j < effectiveResolution; j++) {
+    for (int i = 0; i < quadCount; i++) {
+        for (int j = 0; j < quadCount; j++) {
             // Triangle 1
-            (*outIndices)[idx++] = i * (effectiveResolution + 1) + j;
-            (*outIndices)[idx++] = (i + 1) * (effectiveResolution + 1) + j + 1;
-            (*outIndices)[idx++] = i * (effectiveResolution + 1) + j + 1;
+            (*outIndices)[idx++] = i * gridSize + j;
+            (*outIndices)[idx++] = (i + 1) * gridSize + j + 1;
+            (*outIndices)[idx++] = i * gridSize + j + 1;
 
             // Triangle 2
-            (*outIndices)[idx++] = (i + 1) * (effectiveResolution + 1) + j;
-            (*outIndices)[idx++] = (i + 1) * (effectiveResolution + 1) + j + 1;
-            (*outIndices)[idx++] = i * (effectiveResolution + 1) + j;
+            (*outIndices)[idx++] = (i + 1) * gridSize + j;
+            (*outIndices)[idx++] = (i + 1) * gridSize + j + 1;
+            (*outIndices)[idx++] = i * gridSize + j;
         }
     }
 }
@@ -138,12 +142,12 @@ void FixEdgeSkirts(int resolution, float* positions, float* ups, float* normals,
     int effectiveResolution = resolution + 2;
     float skirtDepth = width * 0.1f;
 
-    for (int i = 0; i < effectiveResolution + 1; i++) {
-        for (int j = 0; j < effectiveResolution + 1; j++) {
-            bool isEdge = (i == 0 || i == effectiveResolution || j == 0 || j == effectiveResolution);
+    for (int i = 0; i < effectiveResolution; i++) {
+        for (int j = 0; j < effectiveResolution; j++) {
+            bool isEdge = (i == 0 || i == effectiveResolution - 1 || j == 0 || j == effectiveResolution - 1);
 
             if (isEdge) {
-                int idx = i * (effectiveResolution + 1) + j;
+                int idx = i * effectiveResolution + j;
 
                 Vector3 up = {ups[idx * 3 + 0], ups[idx * 3 + 1], ups[idx * 3 + 2]};
                 Vector3 offset = Vector3Scale(up, -skirtDepth * (inverted ? -1.0f : 1.0f));
@@ -199,11 +203,33 @@ void Chunk_GenerateMesh(Chunk* chunk, ChunkProps props) {
     // Generate initial heights
     GenerateInitialHeights(props, &positions, &colors, &ups, &vertexCount);
 
+    if (!positions || !colors || !ups || vertexCount <= 0) {
+        printf("ERROR: GenerateInitialHeights failed\n");
+        return;
+    }
+
     // Generate indices
     GenerateIndices(props.resolution, &indices, &indexCount);
 
+    if (!indices || indexCount <= 0) {
+        printf("ERROR: GenerateIndices failed\n");
+        free(positions);
+        free(colors);
+        free(ups);
+        return;
+    }
+
     // Generate normals
     GenerateNormals(positions, indices, vertexCount, indexCount, &normals);
+
+    if (!normals) {
+        printf("ERROR: GenerateNormals failed\n");
+        free(positions);
+        free(colors);
+        free(ups);
+        free(indices);
+        return;
+    }
 
     // Fix edge skirts
     FixEdgeSkirts(props.resolution, positions, ups, normals, props.width, props.radius, props.inverted);
@@ -211,13 +237,27 @@ void Chunk_GenerateMesh(Chunk* chunk, ChunkProps props) {
     // Normalize normals
     NormalizeNormals(normals, vertexCount);
 
+    printf("DEBUG: About to create mesh with vertexCount=%d, indexCount=%d\n", vertexCount, indexCount);
+
     // Create raylib mesh
     chunk->mesh.vertexCount = vertexCount;
     chunk->mesh.triangleCount = indexCount / 3;
 
     chunk->mesh.vertices = positions;
     chunk->mesh.normals = normals;
+
+    printf("DEBUG: Allocating colors array: %d bytes\n", vertexCount * 4);
     chunk->mesh.colors = (unsigned char*)malloc(vertexCount * 4 * sizeof(unsigned char));
+
+    if (!chunk->mesh.colors) {
+        printf("ERROR: Failed to allocate mesh colors\n");
+        free(positions);
+        free(colors);
+        free(ups);
+        free(normals);
+        free(indices);
+        return;
+    }
 
     // Convert float colors to byte colors
     for (int i = 0; i < vertexCount; i++) {

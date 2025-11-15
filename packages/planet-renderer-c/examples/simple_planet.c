@@ -2,6 +2,8 @@
 #include <raymath.h>
 #include <stdio.h>
 #include <math.h>
+
+#include "rlgl.h"
 #include "../include/planet.h"
 
 // Simple perlin-like noise (very basic)
@@ -50,7 +52,7 @@ int main(void) {
 
     // Create planet
     float radius = 100.0f;
-    float minCellSize = 5.0f;
+    float minCellSize = 10.0f;  // Increased from 5.0f to prevent excessive subdivision at close range
     int minCellResolution = 32;
 
     Planet* planet = Planet_Create(
@@ -72,8 +74,8 @@ int main(void) {
         // Update
         UpdateCamera(&camera, CAMERA_FREE);
 
-        // Toggle wireframe with W key
-        if (IsKeyPressed(KEY_W)) {
+        // Toggle wireframe with F key
+        if (IsKeyPressed(KEY_F)) {
             showWireframe = !showWireframe;
         }
 
@@ -122,7 +124,7 @@ int main(void) {
 
                 DrawText("Controls:", 10, 140, 16, LIGHTGRAY);
                 DrawText("  WASD + Mouse: Move camera", 10, 160, 14, LIGHTGRAY);
-                DrawText("  W: Toggle wireframe", 10, 180, 14, LIGHTGRAY);
+                DrawText("  F: Toggle wireframe", 10, 180, 14, LIGHTGRAY);
                 DrawText("  I: Toggle info", 10, 200, 14, LIGHTGRAY);
                 DrawText("  ESC: Exit", 10, 220, 14, LIGHTGRAY);
             }

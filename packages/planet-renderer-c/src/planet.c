@@ -1,4 +1,5 @@
 #include "planet.h"
+#include "math_utils.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -139,6 +140,9 @@ void Planet_Update(Planet* planet, Vector3 lodOrigin) {
                 strncpy(newKeys[newKeyCount], key, 63);
                 newKeys[newKeyCount][63] = '\0';
                 newKeyCount++;
+            } else {
+                // Skip creating new chunks if we've hit the limit
+                continue;
             }
 
             // Check if chunk already exists
@@ -187,6 +191,13 @@ void Planet_Update(Planet* planet, Vector3 lodOrigin) {
             strncpy(keyToRemove, planet->chunkMap[i].key, 64);
             Planet_RemoveChunk(planet, keyToRemove);
         }
+    }
+
+    // Warn if approaching chunk limit
+    if (planet->chunkCount > MAX_CHUNKS * 0.8f) {
+        printf("WARNING: Chunk count high: %d/%d (%.1f%%)\n",
+               planet->chunkCount, MAX_CHUNKS,
+               (planet->chunkCount * 100.0f) / MAX_CHUNKS);
     }
 
     CubicQuadTree_Destroy(quadtree);
