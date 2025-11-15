@@ -5,7 +5,7 @@
 #include <string.h>
 #include <math.h>
 
-#define DEFAULT_LOD_COMPARISON_VALUE 2.0f
+#define DEFAULT_LOD_COMPARISON_VALUE 1.25f  // Match TypeScript implementation
 
 void Planet_MakeChunkKey(int faceIndex, Vector3 position, float size, char* outKey) {
     snprintf(outKey, 64, "f%d_x%.2f_y%.2f_z%.2f_s%.2f",

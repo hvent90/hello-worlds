@@ -15,7 +15,13 @@ QuadTreeNode* QuadTreeNode_Create(Box3 bounds, Matrix localToWorld, Vector3 orig
         node->children[i] = NULL;
     }
 
-    // Calculate sphere center
+    // Calculate sphere center - this is the center of the chunk projected onto the sphere surface
+    // The calculation follows the same logic as the TypeScript implementation:
+    // 1. Start with local 2D center
+    // 2. Transform to 3D world space
+    // 3. Normalize to get direction vector
+    // 4. Scale by radius to project onto sphere
+    // 5. Add planet origin offset
     node->sphereCenter = node->center;
     Vector3_ApplyMatrix(&node->sphereCenter, localToWorld);
     node->sphereCenter = Vector3Normalize(node->sphereCenter);
@@ -73,6 +79,7 @@ void QuadTreeNode_Insert(QuadTreeNode* node, Vector3 pos, float minNodeSize, flo
                          Matrix localToWorld, Vector3 origin, float size) {
     float distToChild = QuadTreeNode_DistanceToPoint(node, pos);
 
+    // LOD subdivision logic: subdivide if camera is close enough and node is large enough
     if (distToChild < node->size.x * comparatorValue && node->size.x > minNodeSize) {
         if (node->childCount == 0) {
             QuadTreeNode_CreateChildren(node, localToWorld, origin, size);
