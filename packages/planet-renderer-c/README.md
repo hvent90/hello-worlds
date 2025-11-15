@@ -26,7 +26,9 @@ The renderer uses a cube-to-sphere projection approach:
 - C compiler (GCC, Clang, MSVC)
 - Raylib (automatically downloaded if not found)
 
-### Compile
+### Linux/macOS
+
+#### Compile
 
 ```bash
 mkdir build
@@ -35,11 +37,64 @@ cmake ..
 make
 ```
 
-### Run Demo
+#### Run Demo
 
 ```bash
 ./simple_planet
 ```
+
+### Windows
+
+#### Installing Prerequisites
+
+1. **Install CMake**
+   - Download from [cmake.org/download](https://cmake.org/download/)
+   - Choose "Windows x64 Installer"
+   - During installation, select "Add CMake to the system PATH for all users"
+   - Verify installation: Open PowerShell and run `cmake --version`
+
+2. **Install a C Compiler** (choose one):
+
+   **Option A: Visual Studio (Recommended)**
+   - Download [Visual Studio Community](https://visualstudio.microsoft.com/downloads/) (free)
+   - During installation, select "Desktop development with C++"
+   - This includes MSVC compiler and necessary build tools
+
+   **Option B: MinGW-w64**
+   - Download from [winlibs.com](https://winlibs.com/) or [msys2.org](https://www.msys2.org/)
+   - Extract to `C:\mingw64`
+   - Add `C:\mingw64\bin` to your system PATH
+   - Verify: `gcc --version` in PowerShell
+
+#### Compile with Visual Studio
+
+```powershell
+mkdir build
+cd build
+cmake ..
+cmake --build . --config Release
+```
+
+#### Compile with MinGW
+
+```powershell
+mkdir build
+cd build
+cmake .. -G "MinGW Makefiles"
+mingw32-make
+```
+
+#### Run Demo
+
+```powershell
+# With Visual Studio build:
+.\Release\simple_planet.exe
+
+# With MinGW build:
+.\simple_planet.exe
+```
+
+**Note**: If you get "DLL not found" errors, make sure raylib DLLs are in the same directory as the executable or in your system PATH.
 
 ## Controls
 
