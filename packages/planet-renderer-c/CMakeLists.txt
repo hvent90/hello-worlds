@@ -9,10 +9,14 @@ find_package(raylib QUIET)
 if (NOT raylib_FOUND)
     # If raylib is not found, try to use FetchContent to download it
     include(FetchContent)
+
+    # Set policy to handle older CMake minimum version in raylib
+    set(CMAKE_POLICY_DEFAULT_CMP0000 NEW)
+
     FetchContent_Declare(
         raylib
         GIT_REPOSITORY https://github.com/raysan5/raylib.git
-        GIT_TAG 5.0
+        GIT_TAG 5.5
     )
     FetchContent_MakeAvailable(raylib)
 endif()
