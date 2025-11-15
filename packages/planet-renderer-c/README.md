@@ -96,6 +96,32 @@ mingw32-make
 
 **Note**: If you get "DLL not found" errors, make sure raylib DLLs are in the same directory as the executable or in your system PATH.
 
+#### Using CLion IDE
+
+CLion has built-in CMake support, making the build process very simple:
+
+1. **Prerequisites**
+   - Install [CLion](https://www.jetbrains.com/clion/download/)
+   - CLion bundles its own CMake, so no separate installation needed
+   - Install a toolchain (CLion will prompt you):
+     - **Windows**: Visual Studio toolchain or MinGW
+     - **macOS**: Xcode Command Line Tools
+     - **Linux**: GCC/Clang
+
+2. **Open Project**
+   - File → Open → Select the `planet-renderer-c` folder
+   - CLion will automatically detect `CMakeLists.txt` and configure the project
+
+3. **Build and Run**
+   - Click the "Build" button (hammer icon) or press `Ctrl+F9` (Windows/Linux) / `Cmd+F9` (macOS)
+   - Select `simple_planet` from the configurations dropdown (top-right)
+   - Click "Run" (play icon) or press `Shift+F10` (Windows/Linux) / `Ctrl+R` (macOS)
+
+4. **Configuration** (optional)
+   - File → Settings → Build, Execution, Deployment → CMake
+   - You can create Debug/Release build profiles
+   - Default build directory: `cmake-build-debug` or `cmake-build-release`
+
 ## Controls
 
 - **WASD + Mouse**: Move camera
