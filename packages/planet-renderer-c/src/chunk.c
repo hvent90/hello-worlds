@@ -20,10 +20,10 @@ void GenerateInitialHeights(ChunkProps props, float** outPositions, float** outC
     *outUps = (float*)malloc(vertexCount * 3 * sizeof(float));
 
     int idx = 0;
-    for (int y = -1; y <= effectiveResolution + 1; y++) {
-        float yp = (props.width * y) / effectiveResolution;
-        for (int x = -1; x <= effectiveResolution + 1; x++) {
-            float xp = (props.width * x) / effectiveResolution;
+    for (int x = -1; x <= effectiveResolution + 1; x++) {
+        float xp = (props.width * x) / effectiveResolution;
+        for (int y = -1; y <= effectiveResolution + 1; y++) {
+            float yp = (props.width * y) / effectiveResolution;
 
             // Start with flat grid position
             Vector3 p = {xp - half, yp - half, props.radius};
@@ -117,8 +117,8 @@ void GenerateNormals(float* positions, unsigned int* indices, int vertexCount,
         Vector3 v1 = {positions[i1 * 3 + 0], positions[i1 * 3 + 1], positions[i1 * 3 + 2]};
         Vector3 v2 = {positions[i2 * 3 + 0], positions[i2 * 3 + 1], positions[i2 * 3 + 2]};
 
-        Vector3 edge1 = Vector3Subtract(v1, v0);
-        Vector3 edge2 = Vector3Subtract(v2, v0);
+        Vector3 edge1 = Vector3Subtract(v2, v1);
+        Vector3 edge2 = Vector3Subtract(v0, v1);
         Vector3 normal = Vector3CrossProduct(edge1, edge2);
 
         // Accumulate normals for each vertex
@@ -139,28 +139,59 @@ void GenerateNormals(float* positions, unsigned int* indices, int vertexCount,
 // Fix edge skirts to prevent gaps between LOD levels
 void FixEdgeSkirts(int resolution, float* positions, float* ups, float* normals,
                   float width, float radius, bool inverted) {
-    int gridSize = resolution + 4;  // Total vertices per dimension
-    int effectiveResolution = resolution + 1;
-    float skirtDepth = width * 0.1f;
+    int effectiveResolution = resolution + 2;
+    int gridSize = effectiveResolution + 1;  // Stride for row-major indexing
 
-    for (int i = 0; i <= effectiveResolution; i++) {
-        for (int j = 0; j <= effectiveResolution; j++) {
-            bool isEdge = (i == 0 || i == effectiveResolution || j == 0 || j == effectiveResolution);
+    // Clamp skirt size to prevent extreme spikes
+    float skirtSize = fminf(width, radius / 5.0f);
+    if (skirtSize < 0) skirtSize = 0;
 
-            if (isEdge) {
-                // Column-major indexing: index = (y+1) * gridSize + (x+1)
-                // where i is y-coordinate and j is x-coordinate (both offset by 1 from -1)
-                int idx = (i + 1) * gridSize + (j + 1);
+    // Helper macro to apply proxy-based skirt fix
+    #define ApplyFix(x, y, proxyX, proxyY) do { \
+        int skirtIndex = (x) * gridSize + (y); \
+        int proxyIndex = (proxyX) * gridSize + (proxyY); \
+        \
+        Vector3 P = {positions[proxyIndex * 3 + 0], \
+                     positions[proxyIndex * 3 + 1], \
+                     positions[proxyIndex * 3 + 2]}; \
+        \
+        Vector3 D = {ups[proxyIndex * 3 + 0], \
+                     ups[proxyIndex * 3 + 1], \
+                     ups[proxyIndex * 3 + 2]}; \
+        \
+        D = Vector3Scale(D, inverted ? skirtSize : -skirtSize); \
+        P = Vector3Add(P, D); \
+        \
+        positions[skirtIndex * 3 + 0] = P.x; \
+        positions[skirtIndex * 3 + 1] = P.y; \
+        positions[skirtIndex * 3 + 2] = P.z; \
+        \
+        normals[skirtIndex * 3 + 0] = normals[proxyIndex * 3 + 0]; \
+        normals[skirtIndex * 3 + 1] = normals[proxyIndex * 3 + 1]; \
+        normals[skirtIndex * 3 + 2] = normals[proxyIndex * 3 + 2]; \
+    } while(0)
 
-                Vector3 up = {ups[idx * 3 + 0], ups[idx * 3 + 1], ups[idx * 3 + 2]};
-                Vector3 offset = Vector3Scale(up, -skirtDepth * (inverted ? -1.0f : 1.0f));
-
-                positions[idx * 3 + 0] += offset.x;
-                positions[idx * 3 + 1] += offset.y;
-                positions[idx * 3 + 2] += offset.z;
-            }
-        }
+    // Left edge (x = 0): copy from x = 1
+    for (int y = 0; y <= effectiveResolution; y++) {
+        ApplyFix(0, y, 1, y);
     }
+
+    // Right edge (x = effectiveResolution): copy from x = effectiveResolution - 1
+    for (int y = 0; y <= effectiveResolution; y++) {
+        ApplyFix(effectiveResolution, y, effectiveResolution - 1, y);
+    }
+
+    // Top edge (y = 0): copy from y = 1
+    for (int x = 0; x <= effectiveResolution; x++) {
+        ApplyFix(x, 0, x, 1);
+    }
+
+    // Bottom edge (y = effectiveResolution): copy from y = effectiveResolution - 1
+    for (int x = 0; x <= effectiveResolution; x++) {
+        ApplyFix(x, effectiveResolution, x, effectiveResolution - 1);
+    }
+
+    #undef ApplyFix
 }
 
 // Normalize all normals
