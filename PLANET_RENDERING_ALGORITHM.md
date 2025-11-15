@@ -28,18 +28,21 @@ The chunk generation process follows these exact steps:
 
 #### Constants and Setup
 ```
-effectiveResolution = resolution  // The actual grid resolution
-gridResolution = resolution + 2   // Includes 1-cell border on each side (skirt)
-vertexCount = (gridResolution + 1) × (gridResolution + 1)
+// Note: 'resolution' here refers to the input resolution parameter
+effectiveResolution = resolution     // The actual grid resolution (input parameter)
+gridResolution = resolution + 2      // Includes 1-cell border on each side (skirt)
+vertexCount = (resolution + 3) × (resolution + 3)  // Total vertices created
 
 half = width / 2
 ```
 
-**CRITICAL**: The vertex grid has dimensions `(gridResolution + 1) × (gridResolution + 1)`, NOT `gridResolution × gridResolution`
+**CRITICAL**: The loops go from -1 to `resolution + 1` (inclusive), creating `(resolution + 3)` iterations per dimension, thus `(resolution + 3) × (resolution + 3)` total vertices
 
 #### Vertex Generation Loop
-Loop from `x = -1` to `x = effectiveResolution + 1` (inclusive):
-  Loop from `y = -1` to `y = effectiveResolution + 1` (inclusive):
+**Important**: x is the row index, y is the column index (row-major order)
+
+Loop from `x = -1` to `x = resolution + 1` (inclusive):
+  Loop from `y = -1` to `y = resolution + 1` (inclusive):
 
     // Step 1: Calculate normalized grid position
     xp = (width × x) / effectiveResolution
@@ -75,7 +78,7 @@ Loop from `x = -1` to `x = effectiveResolution + 1` (inclusive):
     coords[vertexIndex] = W + H     // 3 components (used for UVs/texturing)
     up[vertexIndex] = D             // 3 components: normalized direction
 
-**Note**: The loops go from -1 to effectiveResolution + 1, creating a grid that is `(effectiveResolution + 3) × (effectiveResolution + 3)` in iteration count, which produces `(effectiveResolution + 3) × (effectiveResolution + 3)` vertices.
+**Note**: The loops go from -1 to `resolution + 1` (inclusive on both ends), creating `(resolution + 3)` iterations per dimension, which produces `(resolution + 3) × (resolution + 3)` total vertices.
 
 ---
 
@@ -189,19 +192,19 @@ ApplyFix(x, y, proxyX, proxyY):
   normals[skirtIndex × 3 + 2] = normals[proxyIndex × 3 + 2]
 
 // Apply fix to all four edges
-// Top edge (y = 0): copy from y = 1
+// Left edge (x = 0): copy from x = 1
 for y from 0 to effectiveResolution:
   ApplyFix(0, y, 1, y)
 
-// Bottom edge (y = effectiveResolution): copy from y = effectiveResolution - 1
+// Right edge (x = effectiveResolution): copy from x = effectiveResolution - 1
 for y from 0 to effectiveResolution:
   ApplyFix(effectiveResolution, y, effectiveResolution - 1, y)
 
-// Left edge (x = 0): copy from x = 1
+// Top edge (y = 0): copy from y = 1
 for x from 0 to effectiveResolution:
   ApplyFix(x, 0, x, 1)
 
-// Right edge (x = effectiveResolution): copy from x = effectiveResolution - 1
+// Bottom edge (y = effectiveResolution): copy from y = effectiveResolution - 1
 for x from 0 to effectiveResolution:
   ApplyFix(x, effectiveResolution, x, effectiveResolution - 1)
 ```
@@ -230,17 +233,17 @@ for i from 0 to vertexCount - 1:
 ## Common Implementation Pitfalls
 
 ### 1. Off-by-One Errors in Loop Bounds
-❌ **Wrong**: `for x from -1 to effectiveResolution`
-✅ **Correct**: `for x from -1 to effectiveResolution + 1`
+❌ **Wrong**: `for x from -1 to resolution`
+✅ **Correct**: `for x from -1 to resolution + 1`
 
-The loop must include the extra row/column at the end for proper grid coverage.
+The loop must go to `resolution + 1` (inclusive) to create the full grid with skirt borders.
 
 ### 2. Incorrect Vertex Count
 ❌ **Wrong**: `vertexCount = resolution × resolution`
 ❌ **Wrong**: `vertexCount = (resolution + 2) × (resolution + 2)`
 ✅ **Correct**: `vertexCount = (resolution + 3) × (resolution + 3)`
 
-Because effectiveResolution = resolution, and the loop goes from -1 to effectiveResolution + 1, you get (effectiveResolution + 3) iterations, not (effectiveResolution + 2).
+Because the loop goes from -1 to `resolution + 1` (inclusive), you get `(resolution + 3)` iterations per dimension: from -1, 0, 1, ..., resolution, resolution+1.
 
 ### 3. Incorrect Skirt Implementation
 ❌ **Wrong**: Simply offsetting all edge vertices downward
@@ -255,11 +258,15 @@ The proxy-based approach ensures the skirt starts at the correct height before b
 The edge vectors must originate from vertex 2 (N2), not vertex 1.
 
 ### 5. Index Calculation Errors
-The formula for accessing a vertex at grid position (x, y) is:
+The formula for accessing a vertex at grid position (x, y) in row-major order is:
 ```
-index = x × (effectiveResolution + 1) + y
+index = x × (resolution + 3) + y
 ```
-NOT `x × effectiveResolution + y`
+Where x is the row coordinate and y is the column coordinate. This accounts for the fact that each row has `(resolution + 3)` vertices.
+
+**Critical**: Ensure your vertex generation loop order matches your indexing scheme:
+- If you use row-major indexing (shown above), x must be your outer loop
+- The stride (number of columns) is `(resolution + 3)`, not `(resolution + 1)`
 
 ---
 
@@ -283,12 +290,12 @@ Use this checklist to verify your implementation:
 
 ## Example Values
 
-For `resolution = 32`:
-- `effectiveResolution = 32`
-- `gridResolution = 34` (adds 2 for skirt)
-- `vertexCount = 35 × 35 = 1,225`
-- Loop ranges: `x ∈ [-1, 33]`, `y ∈ [-1, 33]`
-- Index for vertex at (x, y): `x × 35 + y`
+For input `resolution = 32`:
+- `effectiveResolution = 32` (same as input)
+- `gridResolution = 34` (resolution + 2, includes skirt border)
+- `vertexCount = 35 × 35 = 1,225` (resolution + 3 per dimension)
+- Loop ranges: `x ∈ [-1, 33]`, `y ∈ [-1, 33]` (that's -1, 0, 1, ..., 32, 33 = 35 values)
+- Index for vertex at row x, column y: `x × 35 + y`
 
 ---
 

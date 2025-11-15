@@ -9,8 +9,8 @@
 void GenerateInitialHeights(ChunkProps props, float** outPositions, float** outColors,
                            float** outUps, int* outVertexCount) {
     float half = props.width / 2.0f;
-    int resolution = props.resolution + 2;
-    int effectiveResolution = props.resolution;
+    int resolution = props.resolution + 4;
+    int effectiveResolution = props.resolution + 1;
 
     int vertexCount = resolution * resolution;
     *outVertexCount = vertexCount;
@@ -20,10 +20,10 @@ void GenerateInitialHeights(ChunkProps props, float** outPositions, float** outC
     *outUps = (float*)malloc(vertexCount * 3 * sizeof(float));
 
     int idx = 0;
-    for (int x = -1; x <= effectiveResolution; x++) {
-        float xp = (props.width * x) / effectiveResolution;
-        for (int y = -1; y <= effectiveResolution; y++) {
-            float yp = (props.width * y) / effectiveResolution;
+    for (int y = -1; y <= effectiveResolution + 1; y++) {
+        float yp = (props.width * y) / effectiveResolution;
+        for (int x = -1; x <= effectiveResolution + 1; x++) {
+            float xp = (props.width * x) / effectiveResolution;
 
             // Start with flat grid position
             Vector3 p = {xp - half, yp - half, props.radius};
@@ -55,7 +55,7 @@ void GenerateInitialHeights(ChunkProps props, float** outPositions, float** outC
             Vector3 heightVec = Vector3Scale(direction, height * (props.inverted ? -1.0f : 1.0f));
             p = Vector3Add(p, heightVec);
 
-            // Store position
+            // Store position in LOCAL space (transformation will be applied during rendering)
             (*outPositions)[idx * 3 + 0] = p.x;
             (*outPositions)[idx * 3 + 1] = p.y;
             (*outPositions)[idx * 3 + 2] = p.z;
@@ -66,7 +66,7 @@ void GenerateInitialHeights(ChunkProps props, float** outPositions, float** outC
             (*outColors)[idx * 4 + 2] = color.b / 255.0f;
             (*outColors)[idx * 4 + 3] = color.a / 255.0f;
 
-            // Store up vector (direction)
+            // Store up vector in LOCAL space (transformation will be applied during rendering)
             (*outUps)[idx * 3 + 0] = direction.x;
             (*outUps)[idx * 3 + 1] = direction.y;
             (*outUps)[idx * 3 + 2] = direction.z;
@@ -78,10 +78,10 @@ void GenerateInitialHeights(ChunkProps props, float** outPositions, float** outC
 
 // Generate triangle indices
 void GenerateIndices(int resolution, unsigned int** outIndices, int* outIndexCount) {
-    // Grid dimensions: (resolution + 2) x (resolution + 2) vertices
-    // Number of quads: (resolution + 1) x (resolution + 1)
-    int gridSize = resolution + 2;  // Number of vertices per side
-    int quadCount = resolution + 1; // Number of quads per side
+    // Grid dimensions: (resolution + 4) x (resolution + 4) vertices
+    // Number of quads: (resolution + 3) x (resolution + 3)
+    int gridSize = resolution + 4;  // Number of vertices per side
+    int quadCount = resolution + 3; // Number of quads per side
     int indexCount = quadCount * quadCount * 6;
     *outIndices = (unsigned int*)malloc(indexCount * sizeof(unsigned int));
     *outIndexCount = indexCount;
@@ -139,15 +139,18 @@ void GenerateNormals(float* positions, unsigned int* indices, int vertexCount,
 // Fix edge skirts to prevent gaps between LOD levels
 void FixEdgeSkirts(int resolution, float* positions, float* ups, float* normals,
                   float width, float radius, bool inverted) {
-    int effectiveResolution = resolution + 2;
+    int gridSize = resolution + 4;  // Total vertices per dimension
+    int effectiveResolution = resolution + 1;
     float skirtDepth = width * 0.1f;
 
-    for (int i = 0; i < effectiveResolution; i++) {
-        for (int j = 0; j < effectiveResolution; j++) {
-            bool isEdge = (i == 0 || i == effectiveResolution - 1 || j == 0 || j == effectiveResolution - 1);
+    for (int i = 0; i <= effectiveResolution; i++) {
+        for (int j = 0; j <= effectiveResolution; j++) {
+            bool isEdge = (i == 0 || i == effectiveResolution || j == 0 || j == effectiveResolution);
 
             if (isEdge) {
-                int idx = i * effectiveResolution + j;
+                // Column-major indexing: index = (y+1) * gridSize + (x+1)
+                // where i is y-coordinate and j is x-coordinate (both offset by 1 from -1)
+                int idx = (i + 1) * gridSize + (j + 1);
 
                 Vector3 up = {ups[idx * 3 + 0], ups[idx * 3 + 1], ups[idx * 3 + 2]};
                 Vector3 offset = Vector3Scale(up, -skirtDepth * (inverted ? -1.0f : 1.0f));
@@ -182,7 +185,7 @@ Chunk* Chunk_Create(ChunkProps props) {
     chunk->resolution = props.resolution;
     chunk->visible = false;
     chunk->meshGenerated = false;
-    chunk->transform = MatrixIdentity();
+    chunk->transform = props.worldMatrix;  // Store the cube face transformation matrix
 
     // Initialize empty mesh
     chunk->mesh = (Mesh){0};
@@ -296,7 +299,9 @@ void Chunk_Hide(Chunk* chunk) {
 
 void Chunk_Render(Chunk* chunk) {
     if (chunk->visible && chunk->meshGenerated) {
-        DrawModel(chunk->model, chunk->position, 1.0f, WHITE);
+        // Apply the cube face transformation to orient the chunk correctly
+        chunk->model.transform = chunk->transform;
+        DrawModel(chunk->model, (Vector3){0, 0, 0}, 1.0f, WHITE);
     }
 }
 
