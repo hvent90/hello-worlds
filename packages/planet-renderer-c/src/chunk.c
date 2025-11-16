@@ -15,7 +15,9 @@ void GenerateInitialHeights(ChunkProps props, float** outPositions, float** outC
     int vertexCount = resolution * resolution;
     *outVertexCount = vertexCount;
 
-    *outPositions = (float*)malloc(vertexCount * 3 * sizeof(float));
+    // NOTE: positions will become mesh.vertices, managed by raylib - use MemAlloc
+    *outPositions = (float*)MemAlloc(vertexCount * 3 * sizeof(float));
+    // NOTE: colors and ups are temporary arrays freed in this module - use malloc
     *outColors = (float*)malloc(vertexCount * 4 * sizeof(float));
     *outUps = (float*)malloc(vertexCount * 3 * sizeof(float));
 
@@ -105,7 +107,9 @@ void GenerateIndices(int resolution, unsigned int** outIndices, int* outIndexCou
 // Generate normals from positions and indices
 void GenerateNormals(float* positions, unsigned int* indices, int vertexCount,
                     int indexCount, float** outNormals) {
-    *outNormals = (float*)calloc(vertexCount * 3, sizeof(float));
+    // NOTE: normals will become mesh.normals, managed by raylib - use MemAlloc
+    *outNormals = (float*)MemAlloc(vertexCount * 3 * sizeof(float));
+    memset(*outNormals, 0, vertexCount * 3 * sizeof(float));
 
     // Calculate face normals and accumulate
     for (int i = 0; i < indexCount; i += 3) {
@@ -247,9 +251,9 @@ void Chunk_GenerateMesh(Chunk* chunk, ChunkProps props) {
 
     if (!indices || indexCount <= 0) {
         printf("ERROR: GenerateIndices failed\n");
-        free(positions);
-        free(colors);
-        free(ups);
+        MemFree(positions);  // Allocated with MemAlloc
+        free(colors);        // Allocated with malloc
+        free(ups);           // Allocated with malloc
         return;
     }
 
@@ -258,10 +262,10 @@ void Chunk_GenerateMesh(Chunk* chunk, ChunkProps props) {
 
     if (!normals) {
         printf("ERROR: GenerateNormals failed\n");
-        free(positions);
-        free(colors);
-        free(ups);
-        free(indices);
+        MemFree(positions);  // Allocated with MemAlloc
+        free(colors);        // Allocated with malloc
+        free(ups);           // Allocated with malloc
+        free(indices);       // Allocated with malloc
         return;
     }
 
@@ -281,15 +285,16 @@ void Chunk_GenerateMesh(Chunk* chunk, ChunkProps props) {
     chunk->mesh.normals = normals;
 
     printf("DEBUG: Allocating colors array: %d bytes\n", vertexCount * 4);
-    chunk->mesh.colors = (unsigned char*)malloc(vertexCount * 4 * sizeof(unsigned char));
+    // NOTE: mesh.colors is managed by raylib - use MemAlloc
+    chunk->mesh.colors = (unsigned char*)MemAlloc(vertexCount * 4 * sizeof(unsigned char));
 
     if (!chunk->mesh.colors) {
         printf("ERROR: Failed to allocate mesh colors\n");
-        free(positions);
-        free(colors);
-        free(ups);
-        free(normals);
-        free(indices);
+        MemFree(positions);  // Allocated with MemAlloc
+        free(colors);        // Allocated with malloc
+        free(ups);           // Allocated with malloc
+        MemFree(normals);    // Allocated with MemAlloc
+        free(indices);       // Allocated with malloc
         return;
     }
 
@@ -301,7 +306,8 @@ void Chunk_GenerateMesh(Chunk* chunk, ChunkProps props) {
         chunk->mesh.colors[i * 4 + 3] = (unsigned char)(colors[i * 4 + 3] * 255.0f);
     }
 
-    chunk->mesh.indices = (unsigned short*)malloc(indexCount * sizeof(unsigned short));
+    // NOTE: mesh.indices is managed by raylib - use MemAlloc
+    chunk->mesh.indices = (unsigned short*)MemAlloc(indexCount * sizeof(unsigned short));
     for (int i = 0; i < indexCount; i++) {
         chunk->mesh.indices[i] = (unsigned short)indices[i];
     }
