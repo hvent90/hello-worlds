@@ -151,9 +151,9 @@ void FixEdgeSkirts(int resolution, float* positions, float* ups, float* normals,
     if (skirtSize < 0) skirtSize = 0;
 
     // Helper macro to apply proxy-based skirt fix
-    #define ApplyFix(x, y, proxyX, proxyY) do { \
-        int skirtIndex = (x) * gridSize + (y); \
-        int proxyIndex = (proxyX) * gridSize + (proxyY); \
+    #define ApplyFix(xi, yi, proxyXi, proxyYi) do { \
+        int skirtIndex = (xi) * gridSize + (yi); \
+        int proxyIndex = (proxyXi) * gridSize + (proxyYi); \
         \
         Vector3 P = {positions[proxyIndex * 3 + 0], \
                      positions[proxyIndex * 3 + 1], \
