@@ -9,10 +9,10 @@
 void GenerateInitialHeights(ChunkProps props, float** outPositions, float** outColors,
                            float** outUps, int* outVertexCount) {
     float half = props.width / 2.0f;
-    int resolution = props.resolution + 4;
-    int effectiveResolution = props.resolution + 1;
+    int resolution = props.resolution + 2;
+    int effectiveResolution = resolution - 2;
 
-    int vertexCount = resolution * resolution;
+    int vertexCount = (resolution + 1) * (resolution + 1);
     *outVertexCount = vertexCount;
 
     // NOTE: positions will become mesh.vertices, managed by raylib - use MemAlloc
@@ -80,10 +80,10 @@ void GenerateInitialHeights(ChunkProps props, float** outPositions, float** outC
 
 // Generate triangle indices
 void GenerateIndices(int resolution, unsigned int** outIndices, int* outIndexCount) {
-    // Grid dimensions: (resolution + 4) x (resolution + 4) vertices
-    // Number of quads: (resolution + 3) x (resolution + 3)
-    int gridSize = resolution + 4;  // Number of vertices per side
-    int quadCount = resolution + 3; // Number of quads per side
+    // Match TypeScript implementation
+    int effectiveResolution = resolution + 2;
+    int gridSize = effectiveResolution + 1;  // Number of vertices per side
+    int quadCount = effectiveResolution;     // Number of quads per side
     int indexCount = quadCount * quadCount * 6;
     *outIndices = (unsigned int*)malloc(indexCount * sizeof(unsigned int));
     *outIndexCount = indexCount;
