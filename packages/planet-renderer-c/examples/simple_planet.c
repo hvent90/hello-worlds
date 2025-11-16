@@ -71,6 +71,11 @@ int main(void) {
         &radius // Pass radius as user data for color generator
     );
 
+    // Enable floating origin for large planets (recommended for Earth-scale)
+    // Uncomment these lines when testing Earth-scale planets:
+    // planet->floatingOriginEnabled = true;
+    // planet->floatingOriginThreshold = 100000.0f;  // Recenter at 100km from origin
+
     SetTargetFPS(60);
 
     bool showWireframe = false;
@@ -89,6 +94,18 @@ int main(void) {
         // Toggle info with I key
         if (IsKeyPressed(KEY_I)) {
             showInfo = !showInfo;
+        }
+
+        // Handle floating origin recentering
+        // Check if recenter will happen and update camera accordingly
+        if (planet->floatingOriginEnabled) {
+            float distFromOrigin = Vector3Length(camera.position);
+            if (distFromOrigin > planet->floatingOriginThreshold) {
+                // Recenter camera to origin (same offset as planet will use)
+                Vector3 recenterOffset = camera.position;
+                camera.position = Vector3Subtract(camera.position, recenterOffset);
+                camera.target = Vector3Subtract(camera.target, recenterOffset);
+            }
         }
 
         // Update planet LOD based on camera position
@@ -129,11 +146,21 @@ int main(void) {
                 DrawText(TextFormat("Camera: (%.1f, %.1f, %.1f)",
                          camera.position.x, camera.position.y, camera.position.z), 10, 100, 20, WHITE);
 
-                DrawText("Controls:", 10, 140, 16, LIGHTGRAY);
-                DrawText("  WASD + Mouse: Move camera", 10, 160, 14, LIGHTGRAY);
-                DrawText("  F: Toggle wireframe", 10, 180, 14, LIGHTGRAY);
-                DrawText("  I: Toggle info", 10, 200, 14, LIGHTGRAY);
-                DrawText("  ESC: Exit", 10, 220, 14, LIGHTGRAY);
+                // Show floating origin status
+                if (planet->floatingOriginEnabled) {
+                    DrawText(TextFormat("Floating Origin: ON (threshold: %.1f)",
+                             planet->floatingOriginThreshold), 10, 130, 16, GREEN);
+                    DrawText(TextFormat("World Offset: (%.1f, %.1f, %.1f)",
+                             planet->worldOffset.x, planet->worldOffset.y, planet->worldOffset.z), 10, 150, 14, SKYBLUE);
+                } else {
+                    DrawText("Floating Origin: OFF", 10, 130, 16, RED);
+                }
+
+                DrawText("Controls:", 10, 180, 16, LIGHTGRAY);
+                DrawText("  WASD + Mouse: Move camera", 10, 200, 14, LIGHTGRAY);
+                DrawText("  F: Toggle wireframe", 10, 220, 14, LIGHTGRAY);
+                DrawText("  I: Toggle info", 10, 240, 14, LIGHTGRAY);
+                DrawText("  ESC: Exit", 10, 260, 14, LIGHTGRAY);
             }
 
         EndDrawing();
