@@ -5,7 +5,7 @@
 #include "chunk.h"
 #include "cubic_quadtree.h"
 
-#define MAX_CHUNKS 1024
+#define MAX_CHUNKS 16384
 
 // Chunk map entry
 typedef struct ChunkMapEntry {

@@ -5,7 +5,7 @@
 #include <string.h>
 #include <math.h>
 
-#define DEFAULT_LOD_COMPARISON_VALUE 2.0f
+#define DEFAULT_LOD_COMPARISON_VALUE 1.25f
 
 void Planet_MakeChunkKey(int faceIndex, Vector3 position, float size, char* outKey) {
     snprintf(outKey, 64, "f%d_x%.2f_y%.2f_z%.2f_s%.2f",
@@ -23,7 +23,11 @@ Chunk* Planet_FindChunk(Planet* planet, const char* key) {
 
 void Planet_AddChunk(Planet* planet, const char* key, Chunk* chunk) {
     if (planet->chunkCount >= MAX_CHUNKS) {
-        printf("WARNING: Max chunks reached (%d)\n", MAX_CHUNKS);
+        printf("ERROR: Max chunks limit reached (%d/%d). Cannot create more chunks!\n", planet->chunkCount, MAX_CHUNKS);
+        printf("  This will cause missing terrain. Consider:\n");
+        printf("  - Increasing MAX_CHUNKS in planet.h\n");
+        printf("  - Increasing minCellSize (current: %.2f)\n", planet->minCellSize);
+        printf("  - Decreasing lodDistanceComparisonValue (current: %.2f)\n", planet->lodDistanceComparisonValue);
         return;
     }
 
@@ -98,6 +102,26 @@ Planet* Planet_Create(float radius, float minCellSize, int minCellResolution,
 
     // Load default shader
     planet->shader = LoadShaderFromMemory(NULL, NULL);
+
+    // Validate configuration for large-scale planets
+    float lodRatio = radius / minCellSize;
+    if (lodRatio > 50000.0f) {
+        printf("WARNING: Very large planet detected (radius/minCellSize ratio: %.0f)\n", lodRatio);
+        printf("  This may cause floating-point precision issues.\n");
+        printf("  Radius: %.2f, minCellSize: %.2f\n", radius, minCellSize);
+    }
+
+    // Estimate approximate chunk count at max LOD
+    // This is a rough estimate: 6 faces * (2^depth)^2 where depth ≈ log2(radius/minCellSize)
+    if (lodRatio > 100.0f) {
+        int estimatedDepth = (int)(log2f(lodRatio));
+        int estimatedChunks = 6 * (1 << (estimatedDepth * 2));  // 6 * 4^depth
+        if (estimatedChunks > MAX_CHUNKS * 0.5f) {
+            printf("WARNING: Estimated max chunks (%d) may exceed MAX_CHUNKS (%d)\n",
+                   estimatedChunks, MAX_CHUNKS);
+            printf("  Consider increasing minCellSize or MAX_CHUNKS\n");
+        }
+    }
 
     return planet;
 }

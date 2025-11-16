@@ -45,15 +45,22 @@ int main(void) {
     // Define the camera
     Camera3D camera = { 0 };
     camera.position = (Vector3){ 300.0f, 300.0f, 300.0f };
+    // For Earth-scale, use: camera.position = (Vector3){ 6357000.0f * 1.5f, 6357000.0f * 1.5f, 6357000.0f * 1.5f };
     camera.target = (Vector3){ 0.0f, 0.0f, 0.0f };
     camera.up = (Vector3){ 0.0f, 1.0f, 0.0f };
     camera.fovy = 45.0f;
     camera.projection = CAMERA_PERSPECTIVE;
 
     // Create planet
+    // Example 1: Small-scale planet (good for testing)
     float radius = 100.0f;
     float minCellSize = 10.0f;  // Increased from 5.0f to prevent excessive subdivision at close range
     int minCellResolution = 32;
+
+    // Example 2: Earth-scale planet (uncomment to test)
+    // float radius = 6357000.0f;  // Earth radius in meters
+    // float minCellSize = 256.0f;  // 256 meters per minimum cell
+    // int minCellResolution = 32;
 
     Planet* planet = Planet_Create(
         radius,
