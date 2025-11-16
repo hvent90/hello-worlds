@@ -71,6 +71,11 @@ Planet* Planet_Create(float radius, float minCellSize, int minCellResolution,
     planet->colorGen = colorGen;
     planet->userData = userData;
 
+    // Initialize floating origin support
+    planet->worldOffset = (Vector3){0, 0, 0};
+    planet->floatingOriginThreshold = 1000.0f;  // Default: recenter at 1000 units
+    planet->floatingOriginEnabled = false;      // Disabled by default
+
     // Initialize chunk map
     for (int i = 0; i < MAX_CHUNKS; i++) {
         planet->chunkMap[i].active = false;
@@ -127,6 +132,41 @@ Planet* Planet_Create(float radius, float minCellSize, int minCellResolution,
 }
 
 void Planet_Update(Planet* planet, Vector3 lodOrigin) {
+    // Floating origin: recenter world when camera gets too far from origin
+    if (planet->floatingOriginEnabled) {
+        float distFromOrigin = Vector3Length(lodOrigin);
+
+        if (distFromOrigin > planet->floatingOriginThreshold) {
+            // Calculate offset to apply (bring camera back toward origin)
+            Vector3 recenterOffset = lodOrigin;
+
+            // Update accumulated world offset (track "true" world position)
+            planet->worldOffset = Vector3Add(planet->worldOffset, recenterOffset);
+
+            // Translate planet position in opposite direction
+            planet->position = Vector3Subtract(planet->position, recenterOffset);
+
+            // Dispose all existing chunks (they will be regenerated with new positions)
+            // This is Option A: Simple but effective approach
+            for (int i = 0; i < MAX_CHUNKS; i++) {
+                if (planet->chunkMap[i].active) {
+                    Chunk_Destroy(planet->chunkMap[i].chunk);
+                    planet->chunkMap[i].active = false;
+                    planet->chunkMap[i].chunk = NULL;
+                }
+            }
+            planet->chunkCount = 0;
+
+            printf("FLOATING ORIGIN: Recentering world. Camera distance: %.2f\n", distFromOrigin);
+            printf("  World offset now: (%.2f, %.2f, %.2f)\n",
+                   planet->worldOffset.x, planet->worldOffset.y, planet->worldOffset.z);
+            printf("  Disposed %d chunks for regeneration\n", planet->chunkCount);
+
+            // Note: The caller (application) should also update the camera position
+            // by subtracting the same recenterOffset to keep camera near origin
+        }
+    }
+
     // Create cubic quadtree for this frame
     CubicQuadTree* quadtree = CubicQuadTree_Create(
         planet->radius,

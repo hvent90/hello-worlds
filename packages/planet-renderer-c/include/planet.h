@@ -33,6 +33,11 @@ typedef struct Planet {
     void* userData;
 
     Shader shader;
+
+    // Floating origin support
+    Vector3 worldOffset;           // Accumulated offset of world from "true" position
+    float floatingOriginThreshold; // Distance from origin before recentering (default: 1000.0f)
+    bool floatingOriginEnabled;    // Enable/disable feature
 } Planet;
 
 // Planet operations
