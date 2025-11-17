@@ -68,6 +68,18 @@ else()
     target_link_libraries(simple_planet PRIVATE planet_renderer raylib)
 endif()
 
+# Flat plane LOD example
+add_executable(flat_plane_lod
+    examples/flat_plane_lod.c
+)
+
+# Link math library on Unix-like systems (not needed on Windows)
+if (UNIX)
+    target_link_libraries(flat_plane_lod PRIVATE planet_renderer raylib m)
+else()
+    target_link_libraries(flat_plane_lod PRIVATE planet_renderer raylib)
+endif()
+
 # Web platform settings (Emscripten)
 if (EMSCRIPTEN)
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -s USE_GLFW=3 -s ASSERTIONS=1 -s WASM=1 -s ASYNCIFY")
@@ -75,7 +87,7 @@ if (EMSCRIPTEN)
 endif()
 
 # Installation
-install(TARGETS planet_renderer simple_planet
+install(TARGETS planet_renderer simple_planet flat_plane_lod
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
     RUNTIME DESTINATION bin
