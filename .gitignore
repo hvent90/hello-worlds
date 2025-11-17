@@ -9,3 +9,6 @@ dist-ssr
 out
 .next
 .turbo
+.idea/
+cmake-build-*/
+build/
