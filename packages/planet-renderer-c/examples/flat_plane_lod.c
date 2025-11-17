@@ -70,7 +70,7 @@ void FlatChunk_GenerateMesh(FlatChunk* chunk, HeightGenerator heightGen,
     // Allocate arrays
     float* positions = (float*)MemAlloc(vertexCount * 3 * sizeof(float));
     float* normals = (float*)MemAlloc(vertexCount * 3 * sizeof(float));
-    float* colors = (float*)MemAlloc(vertexCount * 4 * sizeof(float));
+    unsigned char* colors = (unsigned char*)MemAlloc(vertexCount * 4 * sizeof(unsigned char));
     float* uvs = (float*)MemAlloc(vertexCount * 2 * sizeof(float));
     unsigned short* indices = (unsigned short*)MemAlloc(indexCount * sizeof(unsigned short));
 
@@ -108,10 +108,10 @@ void FlatChunk_GenerateMesh(FlatChunk* chunk, HeightGenerator heightGen,
             if (colorGen) {
                 color = colorGen(worldPos, height, userData);
             }
-            colors[vidx * 4 + 0] = color.r / 255.0f;
-            colors[vidx * 4 + 1] = color.g / 255.0f;
-            colors[vidx * 4 + 2] = color.b / 255.0f;
-            colors[vidx * 4 + 3] = color.a / 255.0f;
+            colors[vidx * 4 + 0] = color.r;
+            colors[vidx * 4 + 1] = color.g;
+            colors[vidx * 4 + 2] = color.b;
+            colors[vidx * 4 + 3] = color.a;
 
             // Default normal (will calculate properly later)
             normals[vidx * 3 + 0] = 0.0f;
@@ -190,7 +190,7 @@ void FlatChunk_GenerateMesh(FlatChunk* chunk, HeightGenerator heightGen,
     chunk->mesh.triangleCount = indexCount / 3;
     chunk->mesh.vertices = positions;
     chunk->mesh.normals = normals;
-    chunk->mesh.colors = (unsigned char*)colors;
+    chunk->mesh.colors = colors;
     chunk->mesh.texcoords = uvs;
     chunk->mesh.indices = indices;
 
@@ -376,7 +376,7 @@ void FlatPlane_Update(FlatPlane* plane, Vector3 cameraPosition) {
         // Create new chunk
         // The node center is in XY space, but we need it in XZ space for world position
         Vector3 chunkCenter = {node->center.x, 0.0f, node->center.y};
-        float chunkSize = node->size.x * 2.0f;  // Full width (node size is half-width)
+        float chunkSize = node->size.x;  // node->size.x is already the full width
 
         FlatChunk* chunk = FlatChunk_Create(
             chunkCenter,
