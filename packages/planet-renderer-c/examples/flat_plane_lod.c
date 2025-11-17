@@ -330,8 +330,12 @@ void FlatPlane_Update(FlatPlane* plane, Vector3 cameraPosition) {
     plane->quadtree = QuadTree_Create(identity, plane->size, plane->minCellSize,
                                       plane->position, plane->lodDistanceComparisonValue);
 
+    // Convert camera position from world XYZ to quadtree XY space
+    // Quadtree uses: X=world X, Y=world Z, Z=0
+    Vector3 quadtreePos = {cameraPosition.x, cameraPosition.z, 0.0f};
+
     // Insert camera position to subdivide the quadtree
-    QuadTree_Insert(plane->quadtree, cameraPosition);
+    QuadTree_Insert(plane->quadtree, quadtreePos);
 
     // Get all leaf nodes (chunks to render)
     QuadTreeNode** nodes = NULL;
