@@ -341,7 +341,9 @@ void FlatPlane_Update(FlatPlane* plane, Vector3 cameraPosition) {
     char** activeKeys = (char**)malloc(sizeof(char*) * nodeCount);
     for (int i = 0; i < nodeCount; i++) {
         activeKeys[i] = (char*)malloc(64);
-        MakePlaneChunkKey(nodes[i]->center, nodes[i]->size.x, activeKeys[i]);
+        // Convert from quadtree XY space to world XZ space for key generation
+        Vector3 xzCenter = {nodes[i]->center.x, 0.0f, nodes[i]->center.y};
+        MakePlaneChunkKey(xzCenter, nodes[i]->size.x, activeKeys[i]);
     }
 
     // Remove chunks that are no longer needed
