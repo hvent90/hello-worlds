@@ -54,7 +54,8 @@ typedef struct FlatPlane {
 void FlatChunk_Destroy(FlatChunk* chunk) {
     if (!chunk) return;
     if (chunk->meshGenerated) {
-        UnloadMesh(chunk->mesh);
+        // UnloadModel internally handles unloading the mesh from LoadModelFromMesh
+        // so we only need to unload the model, not both
         UnloadModel(chunk->model);
     }
     free(chunk);
