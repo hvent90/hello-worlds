@@ -6,41 +6,14 @@
 #include "rlgl.h"
 #include "../include/planet.h"
 
-// Simple perlin-like noise (very basic)
-float SimpleNoise(float x, float y, float z) {
-    return sinf(x * 0.01f) * cosf(y * 0.01f) * sinf(z * 0.01f);
-}
-
-// Height generator callback
-float MyHeightGenerator(Vector3 worldPosition, float radius, void* userData) {
-    // Simple noise-based height
-    float noise = SimpleNoise(worldPosition.x, worldPosition.y, worldPosition.z);
-    float baseHeight = radius * 0.05f; // 5% of radius
-    return baseHeight * (noise + 0.5f);
-}
-
-// Color generator callback
-Color MyColorGenerator(Vector3 worldPosition, float height, void* userData) {
-    // Color based on height
-    float normalizedHeight = height / (((float*)userData)[0] * 0.05f);
-
-    if (normalizedHeight < 0.3f) {
-        return BLUE; // Water
-    } else if (normalizedHeight < 0.5f) {
-        return BEIGE; // Sand
-    } else if (normalizedHeight < 0.8f) {
-        return GREEN; // Grass
-    } else {
-        return WHITE; // Snow
-    }
-}
-
 int main(void) {
     // Initialization
     const int screenWidth = 1280;
     const int screenHeight = 720;
 
     InitWindow(screenWidth, screenHeight, "Planet Renderer - Raylib C");
+
+    DisableCursor();
 
     // Define the camera
     Camera3D camera = { 0 };
@@ -56,25 +29,6 @@ int main(void) {
     float radius = 100.0f;
     float minCellSize = 10.0f;  // Increased from 5.0f to prevent excessive subdivision at close range
     int minCellResolution = 32;
-
-    // Example 2: Earth-scale planet (uncomment to test)
-    // float radius = 6357000.0f;  // Earth radius in meters
-    // float minCellSize = 256.0f;  // 256 meters per minimum cell
-    // int minCellResolution = 32;
-
-    Planet* planet = Planet_Create(
-        radius,
-        minCellSize,
-        minCellResolution,
-        MyHeightGenerator,
-        MyColorGenerator,
-        &radius // Pass radius as user data for color generator
-    );
-
-    // Enable floating origin for large planets (recommended for Earth-scale)
-    // Uncomment these lines when testing Earth-scale planets:
-    // planet->floatingOriginEnabled = true;
-    // planet->floatingOriginThreshold = 100000.0f;  // Recenter at 100km from origin
 
     SetTargetFPS(60);
 
@@ -96,21 +50,6 @@ int main(void) {
             showInfo = !showInfo;
         }
 
-        // Handle floating origin recentering
-        // Check if recenter will happen and update camera accordingly
-        if (planet->floatingOriginEnabled) {
-            float distFromOrigin = Vector3Length(camera.position);
-            if (distFromOrigin > planet->floatingOriginThreshold) {
-                // Recenter camera to origin (same offset as planet will use)
-                Vector3 recenterOffset = camera.position;
-                camera.position = Vector3Subtract(camera.position, recenterOffset);
-                camera.target = Vector3Subtract(camera.target, recenterOffset);
-            }
-        }
-
-        // Update planet LOD based on camera position
-        Planet_Update(planet, camera.position);
-
         // Draw
         BeginDrawing();
             ClearBackground(BLACK);
@@ -121,8 +60,6 @@ int main(void) {
                     // Note: Wireframe mode in raylib is global
                     rlEnableWireMode();
                 }
-
-                Planet_Render(planet);
 
                 if (showWireframe) {
                     rlDisableWireMode();
@@ -142,19 +79,8 @@ int main(void) {
             if (showInfo) {
                 DrawText("Planet Renderer Demo", 10, 10, 20, WHITE);
                 DrawText(TextFormat("FPS: %d", GetFPS()), 10, 40, 20, LIME);
-                DrawText(TextFormat("Active Chunks: %d", planet->chunkCount), 10, 70, 20, YELLOW);
                 DrawText(TextFormat("Camera: (%.1f, %.1f, %.1f)",
                          camera.position.x, camera.position.y, camera.position.z), 10, 100, 20, WHITE);
-
-                // Show floating origin status
-                if (planet->floatingOriginEnabled) {
-                    DrawText(TextFormat("Floating Origin: ON (threshold: %.1f)",
-                             planet->floatingOriginThreshold), 10, 130, 16, GREEN);
-                    DrawText(TextFormat("World Offset: (%.1f, %.1f, %.1f)",
-                             planet->worldOffset.x, planet->worldOffset.y, planet->worldOffset.z), 10, 150, 14, SKYBLUE);
-                } else {
-                    DrawText("Floating Origin: OFF", 10, 130, 16, RED);
-                }
 
                 DrawText("Controls:", 10, 180, 16, LIGHTGRAY);
                 DrawText("  WASD + Mouse: Move camera", 10, 200, 14, LIGHTGRAY);
@@ -167,7 +93,6 @@ int main(void) {
     }
 
     // Cleanup
-    Planet_Destroy(planet);
     CloseWindow();
 
     return 0;
