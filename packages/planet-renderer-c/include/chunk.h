@@ -2,6 +2,22 @@
 #define CHUNK_H
 
 #include <raylib.h>
-#include <stdbool.h>
+
+typedef struct Chunk {
+    Mesh mesh;
+    Model model;
+    Vector3 offset;
+    float width;
+    float height;
+    float radius;
+    int resolution;
+    Matrix localToWorld;
+    Vector3 origin;
+} Chunk;
+
+Chunk* Chunk_Create(Vector3 offset, float width, float height, float radius, int resolution, Vector3 origin, Matrix localToWorld);
+void Chunk_Generate(Chunk* chunk);
+void Chunk_Draw(Chunk* chunk);
+void Chunk_Free(Chunk* chunk);
 
 #endif // CHUNK_H
