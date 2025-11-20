@@ -26,15 +26,15 @@ CubicQuadTree* CubicQuadTree_Create(float radius, float minNodeSize, float compa
     transforms[5] = MatrixMultiply(MatrixRotateY(PI), MatrixTranslate(0, 0, -radius));
     
     for (int i = 0; i < 6; i++) {
-        tree->faces[i] = Quadtree_Create(radius, minNodeSize, comparatorValue, origin, transforms[i]);
+        tree->faces[i] = Quadtree_CreateWithFace(radius, minNodeSize, comparatorValue, origin, transforms[i], i);  // Pass face index
     }
-    
+
     return tree;
 }
 
-void CubicQuadTree_Insert(CubicQuadTree* tree, Vector3 cameraPosition, QuadtreeSplitCallback onSplit) {
+void CubicQuadTree_Insert(CubicQuadTree* tree, Vector3 cameraPosition) {
     for (int i = 0; i < 6; i++) {
-        Quadtree_Insert(tree->faces[i], cameraPosition, onSplit);
+        Quadtree_Insert(tree->faces[i], cameraPosition);
     }
 }
 

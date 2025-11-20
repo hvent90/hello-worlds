@@ -11,8 +11,9 @@ typedef struct QuadtreeNode {
     Vector3 sphereCenter;
     Vector3 size;
     bool isLeaf;
-    void* userData; // For attaching Chunk*
+    void* userData; // No longer used for chunks
     Matrix localToWorld; // Store transformation for chunk generation
+    int faceIndex;   // NEW: Which cube face (0-5) this node belongs to
 } QuadtreeNode;
 
 typedef struct Quadtree {
@@ -22,12 +23,12 @@ typedef struct Quadtree {
     float minNodeSize;
     Vector3 origin;
     float comparatorValue;
+    int faceIndex;  // NEW: Store face index on tree
 } Quadtree;
 
-typedef void (*QuadtreeSplitCallback)(QuadtreeNode* node);
-
 Quadtree* Quadtree_Create(float size, float minNodeSize, float comparatorValue, Vector3 origin, Matrix localToWorld);
-void Quadtree_Insert(Quadtree* tree, Vector3 cameraPosition, QuadtreeSplitCallback onSplit);
+Quadtree* Quadtree_CreateWithFace(float size, float minNodeSize, float comparatorValue, Vector3 origin, Matrix localToWorld, int faceIndex);
+void Quadtree_Insert(Quadtree* tree, Vector3 cameraPosition);
 void Quadtree_GetLeafNodes(Quadtree* tree, QuadtreeNode*** outNodes, int* outCount);
 void Quadtree_Free(Quadtree* tree);
 
