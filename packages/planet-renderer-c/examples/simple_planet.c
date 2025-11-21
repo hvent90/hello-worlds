@@ -111,6 +111,10 @@ int main(void) {
     planet->surfaceColor = (Color){120, 120, 120, 255}; // Dark gray for moon surface
     planet->wireframeColor = (Color){80, 80, 80, 255}; // Darker gray wireframe
 
+    // Store original wireframe color for toggling
+    Color originalWireframeColor = planet->wireframeColor;
+    bool showWireframe = true;
+
     // Load lighting shader
     Shader lightingShader = LoadShader("shaders/lighting.vs", "shaders/lighting.fs");
     if (lightingShader.id == 0) {
@@ -142,7 +146,8 @@ int main(void) {
     Vector3 lightPos = Vector3Scale(Vector3Negate(lightDir), radius * 3.0f); // Position light far away
     Matrix lightView = MatrixLookAt(lightPos, (Vector3){0, 0, 0}, (Vector3){0, 1, 0});
     float orthoSize = radius * 2.5f; // Cover planet plus some margin
-    Matrix lightProjection = MatrixOrtho(-orthoSize, orthoSize, -orthoSize, orthoSize, 0.1f, radius * 10.0f);
+    // Improved near/far planes to reduce depth buffer precision issues
+    Matrix lightProjection = MatrixOrtho(-orthoSize, orthoSize, -orthoSize, orthoSize, radius * 0.5f, radius * 5.0f);
     Matrix lightSpaceMatrix = MatrixMultiply(lightView, lightProjection);
 
     // Assign shader and shadow map to planet
@@ -154,6 +159,12 @@ int main(void) {
     while (!WindowShouldClose()) {
         // Update
         float currentSpeed = UpdateCameraFlight(&camera);
+
+        // Toggle wireframe with F key
+        if (IsKeyPressed(KEY_F)) {
+            showWireframe = !showWireframe;
+            planet->wireframeColor = showWireframe ? originalWireframeColor : BLANK;
+        }
 
         Planet_Update(planet, camera.position);
 
@@ -211,8 +222,8 @@ int main(void) {
             else sprintf(triStr, "%d,%03d,%03d", triangles / 1000000, (triangles / 1000) % 1000, triangles % 1000);
 
             DrawText(TextFormat("Triangles: %s", triStr), 10, 70, 20, YELLOW);
-            
-            DrawText("WASD: Move | Q/E: Roll | Space/Ctrl: Up/Down | Shift: Fast | Wheel: Speed", 10, 100, 16, DARKGRAY);
+
+            DrawText("WASD: Move | Q/E: Roll | Space/Ctrl: Up/Down | Shift: Fast | Wheel: Speed | F: Wireframe", 10, 100, 16, DARKGRAY);
         EndDrawing();
     }
 
