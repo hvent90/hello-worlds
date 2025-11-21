@@ -139,8 +139,8 @@ int Planet_Draw(Planet* planet) {
         QuadtreeNode* node = leafNodes[i];
         if (node->userData) {
             Chunk* chunk = (Chunk*)node->userData;
-            Chunk_Draw(chunk, planet->surfaceColor, planet->wireframeColor);
-            
+            Chunk_Draw(chunk, planet->surfaceColor, planet->wireframeColor, planet->lightingShader);
+
             // Calculate triangles: resolution^2 * 2
             totalTriangles += (chunk->resolution * chunk->resolution * 2);
         }

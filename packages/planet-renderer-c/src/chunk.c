@@ -1,4 +1,5 @@
 #include "chunk.h"
+#include "noise.h"
 #include <stdlib.h>
 #include <raymath.h>
 #include <stdio.h>
@@ -67,9 +68,25 @@ void Chunk_Generate(Chunk* chunk) {
             
             // Normalize to project onto sphere
             Vector3 normalized = Vector3Normalize(worldPos);
-            
+
+            // Apply noise-based height variation for moon-like terrain
+            // Normalize to [0,1] range across entire face (-radius to +radius)
+            float faceSizeTotal = 2.0f * chunk->radius;
+            float normalizedX = (px + chunk->radius) / faceSizeTotal;
+            float normalizedY = (py + chunk->radius) / faceSizeTotal;
+
+            // Scale for appropriate noise frequency (20 = visible terrain detail at moon scale)
+            float noiseScale = 20.0f;
+            float noiseX = normalizedX * noiseScale;
+            float noiseY = normalizedY * noiseScale;
+            float heightNoise = MoonTerrain(noiseX, noiseY);
+
+            // Map noise from [-1, 1] to height variation (~1% of radius for realistic moon geology)
+            float heightVariation = chunk->radius * 0.005f * heightNoise; // -0.5% to +0.5%
+            float adjustedRadius = chunk->radius + heightVariation;
+
             // Scale by radius and add origin
-            Vector3 finalPos = Vector3Add(Vector3Scale(normalized, chunk->radius), chunk->origin);
+            Vector3 finalPos = Vector3Add(Vector3Scale(normalized, adjustedRadius), chunk->origin);
             
             chunk->mesh.vertices[vIndex * 3] = finalPos.x;
             chunk->mesh.vertices[vIndex * 3 + 1] = finalPos.y;
@@ -127,10 +144,16 @@ void Chunk_Generate(Chunk* chunk) {
     chunk->isUploaded = true;
 }
 
-void Chunk_Draw(Chunk* chunk, Color surfaceColor, Color wireframeColor) {
+void Chunk_Draw(Chunk* chunk, Color surfaceColor, Color wireframeColor, Shader lightingShader) {
     if (chunk->isUploaded) {
+        // Apply lighting shader to the model's material
+        chunk->model.materials[0].shader = lightingShader;
+
+        // Draw with lighting
         DrawModel(chunk->model, (Vector3){0,0,0}, 1.0f, surfaceColor);
-        DrawModelWires(chunk->model, (Vector3){0,0,0}, 1.0f, wireframeColor); // Wireframe for debugging
+
+        // Draw wireframe (without shader for better visibility)
+        DrawModelWires(chunk->model, (Vector3){0,0,0}, 1.0f, wireframeColor);
     }
 }
 

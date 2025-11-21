@@ -19,7 +19,7 @@ typedef struct Chunk {
 
 Chunk* Chunk_Create(Vector3 offset, float width, float height, float radius, int resolution, Vector3 origin, Matrix localToWorld);
 void Chunk_Generate(Chunk* chunk);
-void Chunk_Draw(Chunk* chunk, Color surfaceColor, Color wireframeColor);
+void Chunk_Draw(Chunk* chunk, Color surfaceColor, Color wireframeColor, Shader lightingShader);
 void Chunk_Free(Chunk* chunk);
 
 #endif // CHUNK_H

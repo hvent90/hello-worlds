@@ -4,6 +4,45 @@
 #include "rlgl.h"
 #include <stdio.h>
 
+// Simple lighting shader - vertex shader
+const char* lightingVS = "#version 330\n"
+    "in vec3 vertexPosition;\n"
+    "in vec3 vertexNormal;\n"
+    "uniform mat4 mvp;\n"
+    "uniform mat4 matModel;\n"
+    "uniform mat4 matNormal;\n"
+    "out vec3 fragNormal;\n"
+    "out vec3 fragPosition;\n"
+    "void main() {\n"
+    "    fragNormal = normalize(vec3(matNormal * vec4(vertexNormal, 0.0)));\n"
+    "    fragPosition = vec3(matModel * vec4(vertexPosition, 1.0));\n"
+    "    gl_Position = mvp * vec4(vertexPosition, 1.0);\n"
+    "}\n";
+
+// Simple lighting shader - fragment shader
+const char* lightingFS = "#version 330\n"
+    "in vec3 fragNormal;\n"
+    "in vec3 fragPosition;\n"
+    "uniform vec4 colDiffuse;\n"
+    "uniform vec3 lightDir;\n"
+    "uniform vec3 viewPos;\n"
+    "out vec4 finalColor;\n"
+    "void main() {\n"
+    "    vec3 normal = normalize(fragNormal);\n"
+    "    vec3 lightDirection = normalize(lightDir);\n"
+    "    \n"
+    "    // Ambient lighting\n"
+    "    float ambient = 0.0;\n"
+    "    \n"
+    "    // Diffuse lighting\n"
+    "    float diff = max(dot(normal, lightDirection), 0.0);\n"
+    "    \n"
+    "    // Combine lighting\n"
+    "    float lighting = ambient + diff * 0.7;\n"
+    "    \n"
+    "    finalColor = vec4(colDiffuse.rgb * lighting, colDiffuse.a);\n"
+    "}\n";
+
 float UpdateCameraFlight(Camera3D* camera) {
     // Earth-scale speeds (in meters)
     static float speedMultiplier = 1.0f;
@@ -79,29 +118,45 @@ int main(void) {
     const int screenWidth = 1280;
     const int screenHeight = 720;
 
-    InitWindow(screenWidth, screenHeight, "Planet Renderer C - Simple Planet");
+    InitWindow(screenWidth, screenHeight, "Planet Renderer C - Moon Terrain");
     DisableCursor();
 
     // Set clip planes for Earth-scale rendering
     // Near: 1 km, Far: 100,000 km (to see the whole planet from space)
     rlSetClipPlanes(.1, 100000000.0);
 
+    float earthRadius = 6371000.0f;  // meters
+    float moonRadius = 1737400.0f; // meters
+
     Camera3D camera = { 0 };
     // Earth radius is ~6,371 km. Spawn at ~10,000 km altitude
-    float earthRadius = 6371000.0f;  // meters
-    camera.position = (Vector3){ earthRadius * 1.5f, earthRadius * 1.5f, earthRadius * 1.5f };
+    float radius = moonRadius;
+    camera.position = (Vector3){ radius * 1.3f, radius * 1.3f, radius * 1.3f };
     camera.target = (Vector3){ 0.0f, 0.0f, 0.0f };
     camera.up = (Vector3){ 0.0f, 1.0f, 0.0f };
     camera.fovy = 45.0f;
     camera.projection = CAMERA_PERSPECTIVE;
 
-    // Create Earth-scale Planet
-    // Radius: 6,371 km (Earth)
+    // Create Earth-scale Moon
+    // Radius: 6,371 km (using Earth radius for now, Moon is ~1,737 km)
     // Min cell size: 50 km (determines max detail)
     // Resolution: 32 (vertices per chunk edge for smoother appearance)
-    Planet* planet = Planet_Create(earthRadius, 50000.0f, 32, (Vector3){0, 0, 0});
-    planet->surfaceColor = LIGHTGRAY;
-    planet->wireframeColor = SKYBLUE;
+    Planet* planet = Planet_Create(radius, 500.0f, 32, (Vector3){0, 0, 0});
+    // Moon colors: darker gray surface with subtle wireframe
+    planet->surfaceColor = (Color){120, 120, 120, 255}; // Dark gray for moon surface
+    planet->wireframeColor = (Color){80, 80, 80, 255}; // Darker gray wireframe
+
+    // Load lighting shader
+    Shader lightingShader = LoadShaderFromMemory(lightingVS, lightingFS);
+    int lightDirLoc = GetShaderLocation(lightingShader, "lightDir");
+    int viewPosLoc = GetShaderLocation(lightingShader, "viewPos");
+
+    // Set light direction (from sun - pointing toward origin from upper right)
+    Vector3 lightDir = Vector3Normalize((Vector3){0.5f, 0.8f, 0.3f});
+    SetShaderValue(lightingShader, lightDirLoc, &lightDir, SHADER_UNIFORM_VEC3);
+
+    // Assign shader to planet
+    planet->lightingShader = lightingShader;
 
     SetTargetFPS(60);
 
@@ -125,7 +180,7 @@ int main(void) {
             
             // Calculate altitude (distance from surface)
             float distanceFromCenter = Vector3Length(camera.position);
-            float altitude = distanceFromCenter - earthRadius;
+            float altitude = distanceFromCenter - radius;
             
             // Display altitude in appropriate units
             if (altitude >= 1000.0f) {
