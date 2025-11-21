@@ -42,6 +42,7 @@ add_library(planet_renderer
     src/quadtree.c
     src/cubic_quadtree.c
     src/chunk.c
+    src/chunk_map.c
     src/planet.c
 )
 
