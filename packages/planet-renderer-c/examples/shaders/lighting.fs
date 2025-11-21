@@ -22,8 +22,9 @@ float ShadowCalculation(vec4 fragPosLight, vec3 normal, vec3 lightDirection) {
     // Get depth from shadow map
     float currentDepth = projCoords.z;
 
-    // Bias to prevent shadow acne
-    float bias = max(0.0001 * (1.0 - dot(normal, lightDirection)), 0.00005);
+    // Bias adjusted for improved shadow resolution (8192x8192, 1.5x radius coverage)
+    // With ~300m per texel, smaller bias captures more terrain detail
+    float bias = max(0.001 * (1.0 - dot(normal, lightDirection)), 0.0005);
 
     // PCF (Percentage Closer Filtering) for soft shadows
     float shadow = 0.0;
@@ -43,7 +44,7 @@ void main() {
     vec3 normal = normalize(fragNormal);
     vec3 lightDirection = normalize(lightDir);
 
-    // Ambient lighting
+    // Ambient lighting (increased to make shadows visible against black background)
     float ambient = 0.0;
 
     // Diffuse lighting

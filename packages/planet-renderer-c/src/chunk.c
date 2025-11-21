@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <raymath.h>
 #include <stdio.h>
+#include "rlgl.h"
 
 Chunk* Chunk_Create(Vector3 offset, float width, float height, float radius, int resolution, Vector3 origin, Matrix localToWorld, float terrainFrequency, float terrainAmplitude) {
     Chunk* chunk = (Chunk*)malloc(sizeof(Chunk));
@@ -23,6 +24,72 @@ Chunk* Chunk_Create(Vector3 offset, float width, float height, float radius, int
     chunk->model = (Model){ 0 };
 
     return chunk;
+}
+
+// Calculate normals from geometry using face normal averaging
+// This is CRITICAL for proper shadow mapping - normals must reflect actual terrain geometry!
+static void CalculateTerrainNormals(Mesh* mesh) {
+    // Initialize all normals to zero
+    for (int i = 0; i < mesh->vertexCount * 3; i++) {
+        mesh->normals[i] = 0.0f;
+    }
+
+    // For each triangle, calculate face normal and add to vertex normals
+    for (int i = 0; i < mesh->triangleCount; i++) {
+        unsigned short i0 = mesh->indices[i * 3];
+        unsigned short i1 = mesh->indices[i * 3 + 1];
+        unsigned short i2 = mesh->indices[i * 3 + 2];
+
+        // Get triangle vertices
+        Vector3 v0 = {
+            mesh->vertices[i0 * 3],
+            mesh->vertices[i0 * 3 + 1],
+            mesh->vertices[i0 * 3 + 2]
+        };
+        Vector3 v1 = {
+            mesh->vertices[i1 * 3],
+            mesh->vertices[i1 * 3 + 1],
+            mesh->vertices[i1 * 3 + 2]
+        };
+        Vector3 v2 = {
+            mesh->vertices[i2 * 3],
+            mesh->vertices[i2 * 3 + 1],
+            mesh->vertices[i2 * 3 + 2]
+        };
+
+        // Calculate edge vectors
+        Vector3 edge1 = Vector3Subtract(v1, v0);
+        Vector3 edge2 = Vector3Subtract(v2, v0);
+
+        // Calculate face normal (cross product)
+        Vector3 faceNormal = Vector3CrossProduct(edge1, edge2);
+
+        // Add face normal to each vertex of the triangle
+        mesh->normals[i0 * 3] += faceNormal.x;
+        mesh->normals[i0 * 3 + 1] += faceNormal.y;
+        mesh->normals[i0 * 3 + 2] += faceNormal.z;
+
+        mesh->normals[i1 * 3] += faceNormal.x;
+        mesh->normals[i1 * 3 + 1] += faceNormal.y;
+        mesh->normals[i1 * 3 + 2] += faceNormal.z;
+
+        mesh->normals[i2 * 3] += faceNormal.x;
+        mesh->normals[i2 * 3 + 1] += faceNormal.y;
+        mesh->normals[i2 * 3 + 2] += faceNormal.z;
+    }
+
+    // Normalize all vertex normals
+    for (int i = 0; i < mesh->vertexCount; i++) {
+        Vector3 normal = {
+            mesh->normals[i * 3],
+            mesh->normals[i * 3 + 1],
+            mesh->normals[i * 3 + 2]
+        };
+        normal = Vector3Normalize(normal);
+        mesh->normals[i * 3] = normal.x;
+        mesh->normals[i * 3 + 1] = normal.y;
+        mesh->normals[i * 3 + 2] = normal.z;
+    }
 }
 
 void Chunk_Generate(Chunk* chunk) {
@@ -101,10 +168,11 @@ void Chunk_Generate(Chunk* chunk) {
             chunk->mesh.vertices[vIndex * 3] = finalPos.x;
             chunk->mesh.vertices[vIndex * 3 + 1] = finalPos.y;
             chunk->mesh.vertices[vIndex * 3 + 2] = finalPos.z;
-            
-            chunk->mesh.normals[vIndex * 3] = normalized.x;
-            chunk->mesh.normals[vIndex * 3 + 1] = normalized.y;
-            chunk->mesh.normals[vIndex * 3 + 2] = normalized.z;
+
+            // Normals will be calculated from actual geometry after all vertices are generated
+            chunk->mesh.normals[vIndex * 3] = 0.0f;
+            chunk->mesh.normals[vIndex * 3 + 1] = 0.0f;
+            chunk->mesh.normals[vIndex * 3 + 2] = 0.0f;
             
             chunk->mesh.texcoords[vIndex * 2] = u;
             chunk->mesh.texcoords[vIndex * 2 + 1] = v;
@@ -130,7 +198,11 @@ void Chunk_Generate(Chunk* chunk) {
             vIndex++;
         }
     }
-    
+
+    // Calculate terrain-aware normals from the actual geometry
+    // This is essential for correct shadow mapping and lighting
+    CalculateTerrainNormals(&chunk->mesh);
+
     // Upload to GPU
     if (chunk->isUploaded) {
         // Prevent Raylib from freeing our CPU buffers which we want to reuse
@@ -172,11 +244,16 @@ void Chunk_DrawWithShadow(Chunk* chunk, Color surfaceColor, Color wireframeColor
         // Apply lighting shader to the model's material
         chunk->model.materials[0].shader = lightingShader;
 
-        // Set shadow map as material map (MATERIAL_MAP_METALNESS = texture unit 1)
-        chunk->model.materials[0].maps[MATERIAL_MAP_METALNESS].texture = shadowMap;
+        // Manually activate texture slot 1 and bind shadow map depth texture
+        // This ensures the shadow map is available to the fragment shader on the correct texture unit
+        rlActiveTextureSlot(1);  // Activate texture slot 1 (corresponds to GL_TEXTURE1)
+        rlEnableTexture(shadowMap.id);  // Bind the shadow map depth texture
 
         // Draw with lighting and shadows
         DrawModel(chunk->model, (Vector3){0,0,0}, 1.0f, surfaceColor);
+
+        // Restore texture slot 0 for normal operations
+        rlActiveTextureSlot(0);
 
         // Draw wireframe (without shader for better visibility)
         DrawModelWires(chunk->model, (Vector3){0,0,0}, 1.0f, wireframeColor);

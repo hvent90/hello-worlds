@@ -106,7 +106,7 @@ int main(void) {
     //   - Frequency: 18.0 (controls feature size - lower = larger features)
     //   - Amplitude: 0.003 (controls height variation - 0.3% of radius)
     // Planet* planet = Planet_Create(radius, 500.0f, 32, (Vector3){0, 0, 0}, 18.0f, 0.003f);
-    Planet* planet = Planet_Create(radius, 500.0f, 32, (Vector3){0, 0, 0}, 18.0f, 0.023f);
+    Planet* planet = Planet_Create(radius, 500.0f, 32, (Vector3){0, 0, 0}, 18.0f, 0.003f);
     // Moon colors: darker gray surface with subtle wireframe
     planet->surfaceColor = (Color){120, 120, 120, 255}; // Dark gray for moon surface
     planet->wireframeColor = (Color){80, 80, 80, 255}; // Darker gray wireframe
@@ -138,17 +138,9 @@ int main(void) {
     }
     int shadowLightSpaceMatrixLoc = GetShaderLocation(shadowShader, "lightSpaceMatrix");
 
-    // Create shadow map render texture (2048x2048 depth map)
-    RenderTexture2D shadowMap = LoadRenderTexture(2048, 2048);
-
-    // Calculate light space matrix (view + projection from light's perspective)
-    // For directional light, use orthographic projection covering the planet
-    Vector3 lightPos = Vector3Scale(Vector3Negate(lightDir), radius * 3.0f); // Position light far away
-    Matrix lightView = MatrixLookAt(lightPos, (Vector3){0, 0, 0}, (Vector3){0, 1, 0});
-    float orthoSize = radius * 2.5f; // Cover planet plus some margin
-    // Improved near/far planes to reduce depth buffer precision issues
-    Matrix lightProjection = MatrixOrtho(-orthoSize, orthoSize, -orthoSize, orthoSize, radius * 0.5f, radius * 5.0f);
-    Matrix lightSpaceMatrix = MatrixMultiply(lightView, lightProjection);
+    // Create shadow map render texture (8192x8192 for planetary-scale detail)
+    // Higher resolution needed since each texel must cover ~500m instead of ~2km
+    RenderTexture2D shadowMap = LoadRenderTexture(8192, 8192);
 
     // Assign shader and shadow map to planet
     planet->lightingShader = lightingShader;
@@ -168,11 +160,40 @@ int main(void) {
 
         Planet_Update(planet, camera.position);
 
+        // Calculate camera-focused adaptive light space matrix (updated every frame)
+        // This matches the dynamic LOD system - shadow resolution follows camera like mesh detail
+        Vector3 shadowCenter = camera.position;
+
+        // Calculate altitude and adaptive shadow coverage
+        float distanceFromCenter = Vector3Length(camera.position);
+        float altitude = distanceFromCenter - radius;
+
+        // Adaptive ortho size: scales with altitude for consistent detail
+        // At surface (100m): ~5km coverage = 0.6m per texel (8192 resolution)
+        // At 10km altitude: ~20km coverage = 2.4m per texel
+        // At 100km altitude: ~100km coverage = 12m per texel
+        float baseSize = 5000.0f;  // 5km at surface
+        float altitudeFactor = 1.0f + (altitude / radius) * 3.0f;
+        float orthoSize = baseSize * altitudeFactor;
+
+        // Clamp to reasonable bounds
+        orthoSize = fmaxf(orthoSize, 2000.0f);        // Min 2km coverage
+        orthoSize = fminf(orthoSize, radius * 0.5f);  // Max quarter planet
+
+        // Position light relative to camera (not planet center!)
+        Vector3 lightPos = Vector3Add(shadowCenter, Vector3Scale(Vector3Negate(lightDir), orthoSize * 2.0f));
+        Matrix lightView = MatrixLookAt(lightPos, shadowCenter, (Vector3){0, 1, 0});
+
+        // Orthographic projection centered on camera-focused region
+        Matrix lightProjection = MatrixOrtho(-orthoSize, orthoSize, -orthoSize, orthoSize,
+                                             0.1f, orthoSize * 4.0f);
+        Matrix lightSpaceMatrix = MatrixMultiply(lightView, lightProjection);
+
         // PASS 1: Render shadow map from light's perspective
         SetShaderValueMatrix(shadowShader, shadowLightSpaceMatrixLoc, lightSpaceMatrix);
         BeginTextureMode(shadowMap);
             rlClearScreenBuffers(); // Clear color and depth
-            rlViewport(0, 0, 2048, 2048);
+            rlViewport(0, 0, 8192, 8192);
             Planet_DrawWithShader(planet, shadowShader);
         EndTextureMode();
 
@@ -194,12 +215,8 @@ int main(void) {
             EndMode3D();
 
             DrawFPS(10, 10);
-            
-            // Calculate altitude (distance from surface)
-            float distanceFromCenter = Vector3Length(camera.position);
-            float altitude = distanceFromCenter - radius;
-            
-            // Display altitude in appropriate units
+
+            // Display altitude in appropriate units (altitude calculated earlier for shadow system)
             if (altitude >= 1000.0f) {
                 DrawText(TextFormat("Altitude: %.1f km", altitude / 1000.0f), 10, 30, 20, LIME);
             } else {
