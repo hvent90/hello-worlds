@@ -13,6 +13,8 @@ typedef struct Chunk {
     int resolution;
     Matrix localToWorld;
     Vector3 origin;
+    unsigned long long id; // Unique ID matching QuadtreeNode
+    bool isUploaded; // Track if VRAM is allocated
 } Chunk;
 
 Chunk* Chunk_Create(Vector3 offset, float width, float height, float radius, int resolution, Vector3 origin, Matrix localToWorld);

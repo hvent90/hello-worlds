@@ -3,15 +3,17 @@
 
 #include "cubic_quadtree.h"
 #include "chunk.h"
+#include "chunk_utils.h"
 #include <raylib.h>
 
 typedef struct Planet {
     CubicQuadTree* quadtree;
+    ChunkMap* chunkMap;
+    ChunkPool* chunkPool;
     float radius;
     float minCellSize;
     int minCellResolution;
     Vector3 origin;
-    // We don't need to store chunks array explicitly if we traverse the tree to draw
 } Planet;
 
 Planet* Planet_Create(float radius, float minCellSize, int minCellResolution, Vector3 origin);

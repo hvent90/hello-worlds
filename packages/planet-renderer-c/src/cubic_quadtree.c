@@ -26,7 +26,7 @@ CubicQuadTree* CubicQuadTree_Create(float radius, float minNodeSize, float compa
     transforms[5] = MatrixMultiply(MatrixRotateY(PI), MatrixTranslate(0, 0, -radius));
     
     for (int i = 0; i < 6; i++) {
-        tree->faces[i] = Quadtree_Create(radius, minNodeSize, comparatorValue, origin, transforms[i]);
+        tree->faces[i] = Quadtree_Create(radius, minNodeSize, comparatorValue, origin, transforms[i], i);
     }
     
     return tree;

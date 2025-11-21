@@ -43,6 +43,7 @@ add_library(planet_renderer
     src/cubic_quadtree.c
     src/chunk.c
     src/planet.c
+    src/chunk_utils.c
 )
 
 target_include_directories(planet_renderer PUBLIC

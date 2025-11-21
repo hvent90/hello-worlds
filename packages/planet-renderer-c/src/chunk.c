@@ -12,6 +12,8 @@ Chunk* Chunk_Create(Vector3 offset, float width, float height, float radius, int
     chunk->resolution = resolution;
     chunk->origin = origin;
     chunk->localToWorld = localToWorld;
+    chunk->isUploaded = false;
+    chunk->id = 0;
     
     // Initialize mesh to zero
     chunk->mesh = (Mesh){ 0 };
@@ -25,13 +27,25 @@ void Chunk_Generate(Chunk* chunk) {
     int numVertices = (res + 1) * (res + 1);
     int numTriangles = res * res * 2;
     
-    chunk->mesh.vertexCount = numVertices;
-    chunk->mesh.triangleCount = numTriangles;
-    
-    chunk->mesh.vertices = (float*)malloc(chunk->mesh.vertexCount * 3 * sizeof(float));
-    chunk->mesh.normals = (float*)malloc(chunk->mesh.vertexCount * 3 * sizeof(float));
-    chunk->mesh.texcoords = (float*)malloc(chunk->mesh.vertexCount * 2 * sizeof(float));
-    chunk->mesh.indices = (unsigned short*)malloc(chunk->mesh.triangleCount * 3 * sizeof(unsigned short));
+    // Check if we need to reallocate
+    if (chunk->mesh.vertexCount != numVertices) {
+        // Free old if exists (Raylib UnloadMesh frees VRAM, but we also have CPU pointers)
+        // If we are reusing a chunk, we might have old data.
+        // For simplicity in this phase, let's assume if vertexCount matches, we reuse.
+        
+        if (chunk->mesh.vertices) free(chunk->mesh.vertices);
+        if (chunk->mesh.normals) free(chunk->mesh.normals);
+        if (chunk->mesh.texcoords) free(chunk->mesh.texcoords);
+        if (chunk->mesh.indices) free(chunk->mesh.indices);
+        
+        chunk->mesh.vertexCount = numVertices;
+        chunk->mesh.triangleCount = numTriangles;
+        
+        chunk->mesh.vertices = (float*)malloc(chunk->mesh.vertexCount * 3 * sizeof(float));
+        chunk->mesh.normals = (float*)malloc(chunk->mesh.vertexCount * 3 * sizeof(float));
+        chunk->mesh.texcoords = (float*)malloc(chunk->mesh.vertexCount * 2 * sizeof(float));
+        chunk->mesh.indices = (unsigned short*)malloc(chunk->mesh.triangleCount * 3 * sizeof(unsigned short));
+    }
     
     int vIndex = 0;
     int tIndex = 0;
@@ -42,8 +56,6 @@ void Chunk_Generate(Chunk* chunk) {
             float v = (float)y / res;
             
             // Calculate position on the cube face
-            // offset is the bottom-left corner of this chunk on the face (in local 2D space of the face)
-            // width/height is the size of this chunk
             float px = chunk->offset.x + u * chunk->width;
             float py = chunk->offset.y + v * chunk->height;
             
@@ -63,7 +75,6 @@ void Chunk_Generate(Chunk* chunk) {
             chunk->mesh.vertices[vIndex * 3 + 1] = finalPos.y;
             chunk->mesh.vertices[vIndex * 3 + 2] = finalPos.z;
             
-            // Normal is just the normalized vector (for a perfect sphere)
             chunk->mesh.normals[vIndex * 3] = normalized.x;
             chunk->mesh.normals[vIndex * 3 + 1] = normalized.y;
             chunk->mesh.normals[vIndex * 3 + 2] = normalized.z;
@@ -93,26 +104,46 @@ void Chunk_Generate(Chunk* chunk) {
         }
     }
     
+    // Upload to GPU
+    if (chunk->isUploaded) {
+        // Prevent Raylib from freeing our CPU buffers which we want to reuse
+        // LoadModelFromMesh creates a copy of the mesh struct in model.meshes[0]
+        if (chunk->model.meshes) {
+            chunk->model.meshes[0].vertices = NULL;
+            chunk->model.meshes[0].normals = NULL;
+            chunk->model.meshes[0].texcoords = NULL;
+            chunk->model.meshes[0].indices = NULL;
+        }
+        
+        UnloadModel(chunk->model); 
+        
+        // Reset IDs so UploadMesh creates new VAO/VBOs
+        chunk->mesh.vaoId = 0;
+        chunk->mesh.vboId = 0;
+    }
+    
     UploadMesh(&chunk->mesh, false);
     chunk->model = LoadModelFromMesh(chunk->mesh);
+    chunk->isUploaded = true;
 }
 
 void Chunk_Draw(Chunk* chunk) {
-    // DrawModel(chunk->model, (Vector3){0,0,0}, 1.0f, WHITE);
-    // Since vertices are already in world space (relative to origin), we draw at 0,0,0?
-    // Wait, "finalPos = Vector3Add(Vector3Scale(normalized, chunk->radius), chunk->origin);"
-    // Yes, vertices are absolute world coordinates.
-    // So we draw at 0,0,0 identity.
-    
-    // However, Raylib's DrawModel applies a transform.
-    // If we pass (Vector3){0,0,0}, it translates by 0.
-    // So it should be fine.
-    
-    DrawModel(chunk->model, (Vector3){0,0,0}, 1.0f, WHITE);
-    DrawModelWires(chunk->model, (Vector3){0,0,0}, 1.0f, BLACK); // Wireframe for debugging
+    if (chunk->isUploaded) {
+        DrawModel(chunk->model, (Vector3){0,0,0}, 1.0f, WHITE);
+        DrawModelWires(chunk->model, (Vector3){0,0,0}, 1.0f, BLACK); // Wireframe for debugging
+    }
 }
 
 void Chunk_Free(Chunk* chunk) {
-    UnloadModel(chunk->model); // Unloads mesh too
+    if (chunk->isUploaded) {
+        UnloadModel(chunk->model); // Unloads GPU data
+    }
+    
+    // Free CPU data
+    if (chunk->mesh.vertices) free(chunk->mesh.vertices);
+    if (chunk->mesh.normals) free(chunk->mesh.normals);
+    if (chunk->mesh.texcoords) free(chunk->mesh.texcoords);
+    if (chunk->mesh.indices) free(chunk->mesh.indices);
+    
     free(chunk);
 }
