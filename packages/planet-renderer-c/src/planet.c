@@ -123,7 +123,7 @@ void Planet_Update(Planet* planet, Vector3 cameraPosition) {
     free(leafNodes);
 }
 
-void Planet_Draw(Planet* planet) {
+int Planet_Draw(Planet* planet) {
     // Draw all chunks in the active map
     // We could traverse the quadtree, but iterating the map is faster/easier if we just want to draw all
     // However, traversing quadtree allows for frustum culling later.
@@ -133,15 +133,21 @@ void Planet_Draw(Planet* planet) {
     int leafCount;
     CubicQuadTree_GetLeafNodes(planet->quadtree, &leafNodes, &leafCount);
     
+    int totalTriangles = 0;
+    
     for (int i = 0; i < leafCount; i++) {
         QuadtreeNode* node = leafNodes[i];
         if (node->userData) {
             Chunk* chunk = (Chunk*)node->userData;
             Chunk_Draw(chunk, planet->surfaceColor, planet->wireframeColor);
+            
+            // Calculate triangles: resolution^2 * 2
+            totalTriangles += (chunk->resolution * chunk->resolution * 2);
         }
     }
     
     free(leafNodes);
+    return totalTriangles;
 }
 
 void Planet_Free(Planet* planet) {

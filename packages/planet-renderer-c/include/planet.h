@@ -20,7 +20,7 @@ typedef struct Planet {
 
 Planet* Planet_Create(float radius, float minCellSize, int minCellResolution, Vector3 origin);
 void Planet_Update(Planet* planet, Vector3 cameraPosition);
-void Planet_Draw(Planet* planet);
+int Planet_Draw(Planet* planet);
 void Planet_Free(Planet* planet);
 
 #endif // PLANET_H
