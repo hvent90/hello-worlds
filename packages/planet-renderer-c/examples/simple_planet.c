@@ -49,6 +49,8 @@ int main(void) {
     // Min cell size: 50 km (determines max detail)
     // Resolution: 32 (vertices per chunk edge for smoother appearance)
     Planet* planet = Planet_Create(earthRadius, 50000.0f, 32, (Vector3){0, 0, 0});
+    planet->surfaceColor = BLUE;
+    planet->wireframeColor = GREEN;
 
     SetTargetFPS(60);
 
@@ -65,7 +67,7 @@ int main(void) {
             BeginMode3D(camera);
                 Planet_Draw(planet);
                 // Grid at Earth scale (100 km spacing, 20 lines)
-                DrawGrid(20, 100000.0f);
+                // DrawGrid(20, 100000.0f);
             EndMode3D();
 
             DrawFPS(10, 10);

@@ -90,12 +90,12 @@ void Chunk_Generate(Chunk* chunk) {
                 int bottomRight = bottomLeft + 1;
                 
                 chunk->mesh.indices[tIndex * 3] = topLeft;
-                chunk->mesh.indices[tIndex * 3 + 1] = bottomLeft;
-                chunk->mesh.indices[tIndex * 3 + 2] = topRight;
+                chunk->mesh.indices[tIndex * 3 + 1] = topRight;
+                chunk->mesh.indices[tIndex * 3 + 2] = bottomLeft;
                 
                 chunk->mesh.indices[tIndex * 3 + 3] = topRight;
-                chunk->mesh.indices[tIndex * 3 + 4] = bottomLeft;
-                chunk->mesh.indices[tIndex * 3 + 5] = bottomRight;
+                chunk->mesh.indices[tIndex * 3 + 4] = bottomRight;
+                chunk->mesh.indices[tIndex * 3 + 5] = bottomLeft;
                 
                 tIndex += 2;
             }
@@ -127,10 +127,10 @@ void Chunk_Generate(Chunk* chunk) {
     chunk->isUploaded = true;
 }
 
-void Chunk_Draw(Chunk* chunk) {
+void Chunk_Draw(Chunk* chunk, Color surfaceColor, Color wireframeColor) {
     if (chunk->isUploaded) {
-        DrawModel(chunk->model, (Vector3){0,0,0}, 1.0f, WHITE);
-        DrawModelWires(chunk->model, (Vector3){0,0,0}, 1.0f, BLACK); // Wireframe for debugging
+        DrawModel(chunk->model, (Vector3){0,0,0}, 1.0f, surfaceColor);
+        DrawModelWires(chunk->model, (Vector3){0,0,0}, 1.0f, wireframeColor); // Wireframe for debugging
     }
 }
 

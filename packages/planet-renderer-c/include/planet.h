@@ -14,6 +14,8 @@ typedef struct Planet {
     float minCellSize;
     int minCellResolution;
     Vector3 origin;
+    Color surfaceColor;
+    Color wireframeColor;
 } Planet;
 
 Planet* Planet_Create(float radius, float minCellSize, int minCellResolution, Vector3 origin);

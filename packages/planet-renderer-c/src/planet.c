@@ -24,6 +24,9 @@ Planet* Planet_Create(float radius, float minCellSize, int minCellResolution, Ve
     planet->chunkMap = ChunkMap_Create(1024); // Initial capacity
     planet->chunkPool = ChunkPool_Create(256); // Initial capacity
     
+    planet->surfaceColor = WHITE;
+    planet->wireframeColor = BLACK;
+    
     return planet;
 }
 
@@ -134,7 +137,7 @@ void Planet_Draw(Planet* planet) {
         QuadtreeNode* node = leafNodes[i];
         if (node->userData) {
             Chunk* chunk = (Chunk*)node->userData;
-            Chunk_Draw(chunk);
+            Chunk_Draw(chunk, planet->surfaceColor, planet->wireframeColor);
         }
     }
     
