@@ -1,4 +1,5 @@
 #include "planet.h"
+#include "rlgl.h"
 #include <stdlib.h>
 #include <stdio.h>
 
@@ -7,26 +8,28 @@ static void OnNodeSplit(QuadtreeNode* node) {
     // Empty for now, logic moved to Update
 }
 
-Planet* Planet_Create(float radius, float minCellSize, int minCellResolution, Vector3 origin) {
+Planet* Planet_Create(float radius, float minCellSize, int minCellResolution, Vector3 origin, float terrainFrequency, float terrainAmplitude) {
     Planet* planet = (Planet*)malloc(sizeof(Planet));
     planet->radius = radius;
     planet->minCellSize = minCellSize;
     planet->minCellResolution = minCellResolution;
     planet->origin = origin;
-    
+    planet->terrainFrequency = terrainFrequency;
+    planet->terrainAmplitude = terrainAmplitude;
+
     // Comparator value from TS default: 1.1 or similar.
-    float comparatorValue = 1.5f; 
-    
+    float comparatorValue = 1.5f;
+
     // Initialize Quadtree (will be recreated every frame)
     planet->quadtree = CubicQuadTree_Create(radius, minCellSize, comparatorValue, origin);
-    
+
     // Initialize Chunk Map and Pool
     planet->chunkMap = ChunkMap_Create(1024); // Initial capacity
     planet->chunkPool = ChunkPool_Create(256); // Initial capacity
-    
+
     planet->surfaceColor = WHITE;
     planet->wireframeColor = BLACK;
-    
+
     return planet;
 }
 
@@ -74,7 +77,9 @@ void Planet_Update(Planet* planet, Vector3 cameraPosition) {
                     planet->radius,
                     planet->minCellResolution,
                     planet->origin,
-                    node->localToWorld
+                    node->localToWorld,
+                    planet->terrainFrequency,
+                    planet->terrainAmplitude
                 );
                 chunk->id = id;
             } else {
@@ -86,6 +91,8 @@ void Planet_Update(Planet* planet, Vector3 cameraPosition) {
                 chunk->resolution = planet->minCellResolution;
                 chunk->origin = planet->origin;
                 chunk->localToWorld = node->localToWorld;
+                chunk->terrainFrequency = planet->terrainFrequency;
+                chunk->terrainAmplitude = planet->terrainAmplitude;
                 chunk->id = id;
                 // Mesh needs regeneration
             }
@@ -128,24 +135,48 @@ int Planet_Draw(Planet* planet) {
     // We could traverse the quadtree, but iterating the map is faster/easier if we just want to draw all
     // However, traversing quadtree allows for frustum culling later.
     // Let's stick to quadtree traversal for drawing to match original logic
-    
+
     QuadtreeNode** leafNodes;
     int leafCount;
     CubicQuadTree_GetLeafNodes(planet->quadtree, &leafNodes, &leafCount);
-    
+
     int totalTriangles = 0;
-    
+
     for (int i = 0; i < leafCount; i++) {
         QuadtreeNode* node = leafNodes[i];
         if (node->userData) {
             Chunk* chunk = (Chunk*)node->userData;
-            Chunk_Draw(chunk, planet->surfaceColor, planet->wireframeColor, planet->lightingShader);
+            Chunk_DrawWithShadow(chunk, planet->surfaceColor, planet->wireframeColor, planet->lightingShader, planet->shadowMapTexture);
 
             // Calculate triangles: resolution^2 * 2
             totalTriangles += (chunk->resolution * chunk->resolution * 2);
         }
     }
-    
+
+    free(leafNodes);
+    return totalTriangles;
+}
+
+int Planet_DrawWithShader(Planet* planet, Shader shader) {
+    // Draw all chunks with a custom shader (useful for shadow pass)
+    QuadtreeNode** leafNodes;
+    int leafCount;
+    CubicQuadTree_GetLeafNodes(planet->quadtree, &leafNodes, &leafCount);
+
+    int totalTriangles = 0;
+
+    for (int i = 0; i < leafCount; i++) {
+        QuadtreeNode* node = leafNodes[i];
+        if (node->userData) {
+            Chunk* chunk = (Chunk*)node->userData;
+            // Don't draw wireframe in shadow pass, use BLACK for color (doesn't matter for depth)
+            Chunk_Draw(chunk, BLACK, BLACK, shader);
+
+            // Calculate triangles: resolution^2 * 2
+            totalTriangles += (chunk->resolution * chunk->resolution * 2);
+        }
+    }
+
     free(leafNodes);
     return totalTriangles;
 }

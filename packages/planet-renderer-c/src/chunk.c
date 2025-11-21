@@ -4,7 +4,7 @@
 #include <raymath.h>
 #include <stdio.h>
 
-Chunk* Chunk_Create(Vector3 offset, float width, float height, float radius, int resolution, Vector3 origin, Matrix localToWorld) {
+Chunk* Chunk_Create(Vector3 offset, float width, float height, float radius, int resolution, Vector3 origin, Matrix localToWorld, float terrainFrequency, float terrainAmplitude) {
     Chunk* chunk = (Chunk*)malloc(sizeof(Chunk));
     chunk->offset = offset;
     chunk->width = width;
@@ -13,13 +13,15 @@ Chunk* Chunk_Create(Vector3 offset, float width, float height, float radius, int
     chunk->resolution = resolution;
     chunk->origin = origin;
     chunk->localToWorld = localToWorld;
+    chunk->terrainFrequency = terrainFrequency;
+    chunk->terrainAmplitude = terrainAmplitude;
     chunk->isUploaded = false;
     chunk->id = 0;
-    
+
     // Initialize mesh to zero
     chunk->mesh = (Mesh){ 0 };
     chunk->model = (Model){ 0 };
-    
+
     return chunk;
 }
 
@@ -75,14 +77,22 @@ void Chunk_Generate(Chunk* chunk) {
             float normalizedX = (px + chunk->radius) / faceSizeTotal;
             float normalizedY = (py + chunk->radius) / faceSizeTotal;
 
-            // Scale for appropriate noise frequency (20 = visible terrain detail at moon scale)
-            float noiseScale = 20.0f;
-            float noiseX = normalizedX * noiseScale;
-            float noiseY = normalizedY * noiseScale;
+            // Scale for appropriate noise frequency
+            // Lower scale = larger features visible
+            // For moon (1737km radius): scale of 15-20 gives realistic crater sizes
+            float noiseX = normalizedX * chunk->terrainFrequency;
+            float noiseY = normalizedY * chunk->terrainFrequency;
             float heightNoise = MoonTerrain(noiseX, noiseY);
 
-            // Map noise from [-1, 1] to height variation (~1% of radius for realistic moon geology)
-            float heightVariation = chunk->radius * 0.005f * heightNoise; // -0.5% to +0.5%
+            // Height scaling for realistic lunar features:
+            // - Maria vs Highlands: 1-3 km elevation difference
+            // - Large craters: several km deep
+            // - Total relief: ~5-8 km range
+            //
+            // MoonTerrain returns values roughly in range [-1.5, +1.5]
+            // terrainAmplitude controls the height variation
+            // Default 0.003 (~0.3% of radius) gives realistic scale for moon
+            float heightVariation = chunk->radius * chunk->terrainAmplitude * heightNoise;
             float adjustedRadius = chunk->radius + heightVariation;
 
             // Scale by radius and add origin
@@ -150,6 +160,22 @@ void Chunk_Draw(Chunk* chunk, Color surfaceColor, Color wireframeColor, Shader l
         chunk->model.materials[0].shader = lightingShader;
 
         // Draw with lighting
+        DrawModel(chunk->model, (Vector3){0,0,0}, 1.0f, surfaceColor);
+
+        // Draw wireframe (without shader for better visibility)
+        DrawModelWires(chunk->model, (Vector3){0,0,0}, 1.0f, wireframeColor);
+    }
+}
+
+void Chunk_DrawWithShadow(Chunk* chunk, Color surfaceColor, Color wireframeColor, Shader lightingShader, Texture2D shadowMap) {
+    if (chunk->isUploaded) {
+        // Apply lighting shader to the model's material
+        chunk->model.materials[0].shader = lightingShader;
+
+        // Set shadow map as material map (MATERIAL_MAP_METALNESS = texture unit 1)
+        chunk->model.materials[0].maps[MATERIAL_MAP_METALNESS].texture = shadowMap;
+
+        // Draw with lighting and shadows
         DrawModel(chunk->model, (Vector3){0,0,0}, 1.0f, surfaceColor);
 
         // Draw wireframe (without shader for better visibility)

@@ -4,45 +4,6 @@
 #include "rlgl.h"
 #include <stdio.h>
 
-// Simple lighting shader - vertex shader
-const char* lightingVS = "#version 330\n"
-    "in vec3 vertexPosition;\n"
-    "in vec3 vertexNormal;\n"
-    "uniform mat4 mvp;\n"
-    "uniform mat4 matModel;\n"
-    "uniform mat4 matNormal;\n"
-    "out vec3 fragNormal;\n"
-    "out vec3 fragPosition;\n"
-    "void main() {\n"
-    "    fragNormal = normalize(vec3(matNormal * vec4(vertexNormal, 0.0)));\n"
-    "    fragPosition = vec3(matModel * vec4(vertexPosition, 1.0));\n"
-    "    gl_Position = mvp * vec4(vertexPosition, 1.0);\n"
-    "}\n";
-
-// Simple lighting shader - fragment shader
-const char* lightingFS = "#version 330\n"
-    "in vec3 fragNormal;\n"
-    "in vec3 fragPosition;\n"
-    "uniform vec4 colDiffuse;\n"
-    "uniform vec3 lightDir;\n"
-    "uniform vec3 viewPos;\n"
-    "out vec4 finalColor;\n"
-    "void main() {\n"
-    "    vec3 normal = normalize(fragNormal);\n"
-    "    vec3 lightDirection = normalize(lightDir);\n"
-    "    \n"
-    "    // Ambient lighting\n"
-    "    float ambient = 0.0;\n"
-    "    \n"
-    "    // Diffuse lighting\n"
-    "    float diff = max(dot(normal, lightDirection), 0.0);\n"
-    "    \n"
-    "    // Combine lighting\n"
-    "    float lighting = ambient + diff * 0.7;\n"
-    "    \n"
-    "    finalColor = vec4(colDiffuse.rgb * lighting, colDiffuse.a);\n"
-    "}\n";
-
 float UpdateCameraFlight(Camera3D* camera) {
     // Earth-scale speeds (in meters)
     static float speedMultiplier = 1.0f;
@@ -141,30 +102,75 @@ int main(void) {
     // Radius: 6,371 km (using Earth radius for now, Moon is ~1,737 km)
     // Min cell size: 50 km (determines max detail)
     // Resolution: 32 (vertices per chunk edge for smoother appearance)
-    Planet* planet = Planet_Create(radius, 500.0f, 32, (Vector3){0, 0, 0});
+    // Terrain parameters:
+    //   - Frequency: 18.0 (controls feature size - lower = larger features)
+    //   - Amplitude: 0.003 (controls height variation - 0.3% of radius)
+    // Planet* planet = Planet_Create(radius, 500.0f, 32, (Vector3){0, 0, 0}, 18.0f, 0.003f);
+    Planet* planet = Planet_Create(radius, 500.0f, 32, (Vector3){0, 0, 0}, 18.0f, 0.023f);
     // Moon colors: darker gray surface with subtle wireframe
     planet->surfaceColor = (Color){120, 120, 120, 255}; // Dark gray for moon surface
     planet->wireframeColor = (Color){80, 80, 80, 255}; // Darker gray wireframe
 
     // Load lighting shader
-    Shader lightingShader = LoadShaderFromMemory(lightingVS, lightingFS);
+    Shader lightingShader = LoadShader("shaders/lighting.vs", "shaders/lighting.fs");
+    if (lightingShader.id == 0) {
+        printf("ERROR: Failed to load lighting shader!\n");
+        printf("Make sure shaders/lighting.vs and shaders/lighting.fs exist in the working directory.\n");
+    }
     int lightDirLoc = GetShaderLocation(lightingShader, "lightDir");
     int viewPosLoc = GetShaderLocation(lightingShader, "viewPos");
+    int lightSpaceMatrixLoc = GetShaderLocation(lightingShader, "lightSpaceMatrix");
+    int shadowMapLoc = GetShaderLocation(lightingShader, "shadowMap");
 
     // Set light direction (from sun - pointing toward origin from upper right)
     Vector3 lightDir = Vector3Normalize((Vector3){0.5f, 0.8f, 0.3f});
     SetShaderValue(lightingShader, lightDirLoc, &lightDir, SHADER_UNIFORM_VEC3);
 
-    // Assign shader to planet
+    // Load shadow shader
+    Shader shadowShader = LoadShader("shaders/shadow.vs", "shaders/shadow.fs");
+    if (shadowShader.id == 0) {
+        printf("ERROR: Failed to load shadow shader!\n");
+        printf("Make sure shaders/shadow.vs and shaders/shadow.fs exist in the working directory.\n");
+    }
+    int shadowLightSpaceMatrixLoc = GetShaderLocation(shadowShader, "lightSpaceMatrix");
+
+    // Create shadow map render texture (2048x2048 depth map)
+    RenderTexture2D shadowMap = LoadRenderTexture(2048, 2048);
+
+    // Calculate light space matrix (view + projection from light's perspective)
+    // For directional light, use orthographic projection covering the planet
+    Vector3 lightPos = Vector3Scale(Vector3Negate(lightDir), radius * 3.0f); // Position light far away
+    Matrix lightView = MatrixLookAt(lightPos, (Vector3){0, 0, 0}, (Vector3){0, 1, 0});
+    float orthoSize = radius * 2.5f; // Cover planet plus some margin
+    Matrix lightProjection = MatrixOrtho(-orthoSize, orthoSize, -orthoSize, orthoSize, 0.1f, radius * 10.0f);
+    Matrix lightSpaceMatrix = MatrixMultiply(lightView, lightProjection);
+
+    // Assign shader and shadow map to planet
     planet->lightingShader = lightingShader;
+    planet->shadowMapTexture = shadowMap.depth;
 
     SetTargetFPS(60);
 
     while (!WindowShouldClose()) {
         // Update
         float currentSpeed = UpdateCameraFlight(&camera);
-        
+
         Planet_Update(planet, camera.position);
+
+        // PASS 1: Render shadow map from light's perspective
+        SetShaderValueMatrix(shadowShader, shadowLightSpaceMatrixLoc, lightSpaceMatrix);
+        BeginTextureMode(shadowMap);
+            rlClearScreenBuffers(); // Clear color and depth
+            rlViewport(0, 0, 2048, 2048);
+            Planet_DrawWithShader(planet, shadowShader);
+        EndTextureMode();
+
+        // PASS 2: Normal rendering with shadows
+        SetShaderValueMatrix(lightingShader, lightSpaceMatrixLoc, lightSpaceMatrix);
+        // Set shadow map texture - we'll bind it manually in Chunk_Draw
+        // For now, we'll set the sampler to use texture unit 1
+        int shadowMapTextureUnit = 1;
+        SetShaderValue(lightingShader, shadowMapLoc, &shadowMapTextureUnit, SHADER_UNIFORM_INT);
 
         // Draw
         BeginDrawing();

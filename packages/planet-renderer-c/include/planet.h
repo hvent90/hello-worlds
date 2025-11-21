@@ -17,11 +17,16 @@ typedef struct Planet {
     Color surfaceColor;
     Color wireframeColor;
     Shader lightingShader;
+    Texture2D shadowMapTexture;
+    // Terrain generation parameters
+    float terrainFrequency;  // Noise frequency multiplier (affects feature size)
+    float terrainAmplitude;  // Height variation multiplier (affects feature height)
 } Planet;
 
-Planet* Planet_Create(float radius, float minCellSize, int minCellResolution, Vector3 origin);
+Planet* Planet_Create(float radius, float minCellSize, int minCellResolution, Vector3 origin, float terrainFrequency, float terrainAmplitude);
 void Planet_Update(Planet* planet, Vector3 cameraPosition);
 int Planet_Draw(Planet* planet);
+int Planet_DrawWithShader(Planet* planet, Shader shader);
 void Planet_Free(Planet* planet);
 
 #endif // PLANET_H
