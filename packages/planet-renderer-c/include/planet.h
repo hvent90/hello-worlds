@@ -4,12 +4,14 @@
 #include "cubic_quadtree.h"
 #include "chunk.h"
 #include "chunk_utils.h"
+#include "thread_pool.h"
 #include <raylib.h>
 
 typedef struct Planet {
     CubicQuadTree* quadtree;
     ChunkMap* chunkMap;
     ChunkPool* chunkPool;
+    ThreadPool* threadPool;
     float radius;
     float minCellSize;
     int minCellResolution;
