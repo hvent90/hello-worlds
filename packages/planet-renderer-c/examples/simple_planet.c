@@ -284,8 +284,13 @@ int main(void) {
 
         Planet_Update(planet, camera.position);
 
+        // Calculate radar altitude (height above actual terrain)
+        float distFromCenter = Vector3Length(camera.position);
+        float terrainHeight = GetTerrainHeightAtPosition(camera.position, moonRadius, 18.0f, 0.003f);
+        float radarAltitude = distFromCenter - terrainHeight;
+
         // Update CSM
-        CSM_UpdateCascades(csm, camera, radius, 0.003f);
+        CSM_UpdateCascades(csm, camera, radius, 0.003f, radarAltitude);
 
         // PASS 1: Render all cascade shadow maps
         for (int i = 0; i < CASCADE_COUNT; i++) {
@@ -340,10 +345,7 @@ int main(void) {
             DrawFPS(10, 10);
 
             // Display altitude
-            float distFromCenter = Vector3Length(camera.position);
-            // Calculate radar altitude (height above actual terrain)
-            float terrainHeight = GetTerrainHeightAtPosition(camera.position, moonRadius, 18.0f, 0.003f);
-            float radarAltitude = distFromCenter - terrainHeight;
+            // Already calculated above
 
             if (radarAltitude >= 1000.0f) {
                 DrawText(TextFormat("Altitude: %.1f km", radarAltitude / 1000.0f), 10, 40, 20, GREEN);

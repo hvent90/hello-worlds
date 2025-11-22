@@ -29,11 +29,12 @@ void CSM_Destroy(CascadedShadowMap* csm) {
 }
 
 
-void CSM_UpdateCascades(CascadedShadowMap* csm, Camera camera, float planetRadius, float terrainAmplitude) {
+void CSM_UpdateCascades(CascadedShadowMap* csm, Camera camera, float planetRadius, float terrainAmplitude, float viewAltitude) {
     // Calculate camera altitude
-    Vector3 planetCenter = {0, 0, 0};
-    float distanceFromCenter = Vector3Length(camera.position);
-    float altitude = distanceFromCenter - planetRadius;
+    // Vector3 planetCenter = {0, 0, 0};
+    // float distanceFromCenter = Vector3Length(camera.position);
+    // float altitude = distanceFromCenter - planetRadius;
+    float altitude = viewAltitude;
 
     // Calculate maximum terrain displacement
     // terrainAmplitude is a fraction of radius (e.g., 0.003 = 0.3%)

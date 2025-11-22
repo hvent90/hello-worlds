@@ -27,7 +27,7 @@ CascadedShadowMap* CSM_Create(Vector3 lightDir, int resolution);
 void CSM_Destroy(CascadedShadowMap* csm);
 
 // Per-frame update
-void CSM_UpdateCascades(CascadedShadowMap* csm, Camera camera, float planetRadius, float terrainAmplitude);
+void CSM_UpdateCascades(CascadedShadowMap* csm, Camera camera, float planetRadius, float terrainAmplitude, float viewAltitude);
 
 // Utility
 
