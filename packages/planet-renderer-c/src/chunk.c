@@ -160,6 +160,7 @@ void Chunk_Generate(Chunk* chunk) {
             // terrainAmplitude controls the height variation
             // Default 0.003 (~0.3% of radius) gives realistic scale for moon
             float heightVariation = chunk->radius * chunk->terrainAmplitude * heightNoise;
+            
             float adjustedRadius = chunk->radius + heightVariation;
 
             // Scale by radius and add origin
@@ -244,16 +245,11 @@ void Chunk_DrawWithShadow(Chunk* chunk, Color surfaceColor, Color wireframeColor
         // Apply lighting shader to the model's material
         chunk->model.materials[0].shader = lightingShader;
 
-        // Manually activate texture slot 1 and bind shadow map depth texture
-        // This ensures the shadow map is available to the fragment shader on the correct texture unit
-        rlActiveTextureSlot(1);  // Activate texture slot 1 (corresponds to GL_TEXTURE1)
-        rlEnableTexture(shadowMap.id);  // Bind the shadow map depth texture
+        // NOTE: Shadow map textures are now bound globally for CSM
+        // We no longer bind them per-chunk to avoid conflicts with cascade textures
 
         // Draw with lighting and shadows
         DrawModel(chunk->model, (Vector3){0,0,0}, 1.0f, surfaceColor);
-
-        // Restore texture slot 0 for normal operations
-        rlActiveTextureSlot(0);
 
         // Draw wireframe (without shader for better visibility)
         DrawModelWires(chunk->model, (Vector3){0,0,0}, 1.0f, wireframeColor);

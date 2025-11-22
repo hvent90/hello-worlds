@@ -45,6 +45,7 @@ add_library(planet_renderer
     src/planet.c
     src/chunk_utils.c
     src/noise.c
+    src/shadow.c
 )
 
 target_include_directories(planet_renderer PUBLIC

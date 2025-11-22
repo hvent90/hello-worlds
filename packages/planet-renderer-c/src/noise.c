@@ -235,7 +235,14 @@ float MoonTerrain(float x, float y) {
     float mariaRoughness = FBM(x * 15.0f, y * 15.0f, 2, 0.3f, 2.0f) * 0.02f * mariaAmount;
 
     // 9. Regolith texture (very fine, everywhere)
-    float regolith = FBM(x * 30.0f, y * 30.0f, 2, 0.2f, 2.5f) * 0.01f;
+    // Increased frequency significantly to be visible at surface level
+    // Base freq 18 * 30 = 540 -> ~6km wavelength
+    // We need meter-scale detail. 
+    // Add 2000x scale -> ~100m wavelength
+    float regolith = FBM(x * 1500.0f, y * 1500.0f, 3, 0.5f, 2.0f) * 0.005f;
+    
+    // 10. Micro-craters (high frequency)
+    float microCraters = CraterField(x, y, 200.0f, 0.2f);
 
     // Combine all features
     float terrain = baseElevation
@@ -243,6 +250,7 @@ float MoonTerrain(float x, float y) {
                   + complexCraters * 0.8f
                   + simpleCraters * 0.6f
                   + smallCraters * 0.3f
+                  + microCraters
                   + ridges
                   + highlandRoughness
                   + mariaRoughness

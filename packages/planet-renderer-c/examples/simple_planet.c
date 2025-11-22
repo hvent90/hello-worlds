@@ -1,8 +1,10 @@
 #include "planet.h"
+#include "shadow.h"
 #include <raylib.h>
 #include <raymath.h>
 #include "rlgl.h"
 #include <stdio.h>
+
 
 float UpdateCameraFlight(Camera3D* camera) {
     // Earth-scale speeds (in meters)
@@ -75,11 +77,52 @@ float UpdateCameraFlight(Camera3D* camera) {
     return speed;
 }
 
+void DrawCascadeDebugOverlay(CascadedShadowMap* csm, Camera camera) {
+    DrawText("CSM Debug Info:", 10, 130, 20, WHITE);
+    Color colors[] = {RED, GREEN, BLUE, YELLOW};
+    for (int i = 0; i < CASCADE_COUNT; i++) {
+        DrawText(TextFormat("Cascade %d: Split %.1fm", i, csm->cascades[i].splitDistance), 
+                 10, 155 + i * 25, 20, colors[i]);
+    }
+}
+
+// Calculate exact terrain height at a given position
+// This duplicates the logic from Chunk_Generate to ensure the HUD matches the visual terrain
+float GetTerrainHeightAtPosition(Vector3 position, float planetRadius, float terrainFrequency, float terrainAmplitude) {
+    // Normalize to get direction vector (equivalent to projecting onto sphere)
+    Vector3 normalized = Vector3Normalize(position);
+    
+    // Calculate UV/Noise coordinates
+    // We assume the camera is over the generated terrain (Z+ face)
+    // Project the camera position onto the cube face plane
+    
+    float absZ = fabsf(normalized.z);
+    if (absZ < 0.0001f) absZ = 0.0001f;
+    
+    // Project to cube face at distance 'radius'
+    float projectionScale = planetRadius / absZ;
+    float px = normalized.x * projectionScale;
+    float py = normalized.y * projectionScale;
+    
+    // Now calculate noise
+    float faceSizeTotal = 2.0f * planetRadius;
+    float normalizedX = (px + planetRadius) / faceSizeTotal;
+    float normalizedY = (py + planetRadius) / faceSizeTotal;
+    
+    float noiseX = normalizedX * terrainFrequency;
+    float noiseY = normalizedY * terrainFrequency;
+    
+    float heightNoise = MoonTerrain(noiseX, noiseY);
+    float heightVariation = planetRadius * terrainAmplitude * heightNoise;
+    
+    return planetRadius + heightVariation;
+}
+
 int main(void) {
     const int screenWidth = 1280;
     const int screenHeight = 720;
 
-    InitWindow(screenWidth, screenHeight, "Planet Renderer C - Moon Terrain");
+    InitWindow(screenWidth, screenHeight, "Planet Renderer C - Moon Terrain (CSM)");
     DisableCursor();
 
     // Set clip planes for Earth-scale rendering
@@ -99,13 +142,6 @@ int main(void) {
     camera.projection = CAMERA_PERSPECTIVE;
 
     // Create Earth-scale Moon
-    // Radius: 6,371 km (using Earth radius for now, Moon is ~1,737 km)
-    // Min cell size: 50 km (determines max detail)
-    // Resolution: 32 (vertices per chunk edge for smoother appearance)
-    // Terrain parameters:
-    //   - Frequency: 18.0 (controls feature size - lower = larger features)
-    //   - Amplitude: 0.003 (controls height variation - 0.3% of radius)
-    // Planet* planet = Planet_Create(radius, 500.0f, 32, (Vector3){0, 0, 0}, 18.0f, 0.003f);
     Planet* planet = Planet_Create(radius, 500.0f, 32, (Vector3){0, 0, 0}, 18.0f, 0.003f);
     // Moon colors: darker gray surface with subtle wireframe
     planet->surfaceColor = (Color){120, 120, 120, 255}; // Dark gray for moon surface
@@ -119,12 +155,18 @@ int main(void) {
     Shader lightingShader = LoadShader("shaders/lighting.vs", "shaders/lighting.fs");
     if (lightingShader.id == 0) {
         printf("ERROR: Failed to load lighting shader!\n");
-        printf("Make sure shaders/lighting.vs and shaders/lighting.fs exist in the working directory.\n");
     }
     int lightDirLoc = GetShaderLocation(lightingShader, "lightDir");
     int viewPosLoc = GetShaderLocation(lightingShader, "viewPos");
-    int lightSpaceMatrixLoc = GetShaderLocation(lightingShader, "lightSpaceMatrix");
-    int shadowMapLoc = GetShaderLocation(lightingShader, "shadowMap");
+    
+    // CSM Uniform Locations
+    int cascadeShadowMapsLoc = GetShaderLocation(lightingShader, "cascadeShadowMaps");
+    int cascadeDistancesLoc = GetShaderLocation(lightingShader, "cascadeDistances");
+    // We'll get matrix locations dynamically or pre-fetch them
+    int cascadeLightMatricesLocs[CASCADE_COUNT];
+    for(int i=0; i<CASCADE_COUNT; i++) {
+        cascadeLightMatricesLocs[i] = GetShaderLocation(lightingShader, TextFormat("cascadeLightMatrices[%d]", i));
+    }
 
     // Set light direction (from sun - pointing toward origin from upper right)
     Vector3 lightDir = Vector3Normalize((Vector3){0.5f, 0.8f, 0.3f});
@@ -134,17 +176,15 @@ int main(void) {
     Shader shadowShader = LoadShader("shaders/shadow.vs", "shaders/shadow.fs");
     if (shadowShader.id == 0) {
         printf("ERROR: Failed to load shadow shader!\n");
-        printf("Make sure shaders/shadow.vs and shaders/shadow.fs exist in the working directory.\n");
     }
     int shadowLightSpaceMatrixLoc = GetShaderLocation(shadowShader, "lightSpaceMatrix");
 
-    // Create shadow map render texture (8192x8192 for planetary-scale detail)
-    // Higher resolution needed since each texel must cover ~500m instead of ~2km
-    RenderTexture2D shadowMap = LoadRenderTexture(8192, 8192);
+    // Create CSM with high resolution for sharp shadows
+    CascadedShadowMap* csm = CSM_Create(lightDir, 4096);
 
-    // Assign shader and shadow map to planet
+    // Assign shader to planet (shadow map texture will be handled per cascade/frame)
     planet->lightingShader = lightingShader;
-    planet->shadowMapTexture = shadowMap.depth;
+    // planet->shadowMapTexture = ...; // Not used directly anymore, we bind manually
 
     SetTargetFPS(60);
 
@@ -160,49 +200,47 @@ int main(void) {
 
         Planet_Update(planet, camera.position);
 
-        // Calculate camera-focused adaptive light space matrix (updated every frame)
-        // This matches the dynamic LOD system - shadow resolution follows camera like mesh detail
-        Vector3 shadowCenter = camera.position;
+        // Update CSM
+        CSM_UpdateCascades(csm, camera, radius, 0.003f);
 
-        // Calculate altitude and adaptive shadow coverage
-        float distanceFromCenter = Vector3Length(camera.position);
-        float altitude = distanceFromCenter - radius;
+        // PASS 1: Render all cascade shadow maps
+        for (int i = 0; i < CASCADE_COUNT; i++) {
+            SetShaderValueMatrix(shadowShader, shadowLightSpaceMatrixLoc,
+                               csm->cascades[i].lightSpaceMatrix);
 
-        // Adaptive ortho size: scales with altitude for consistent detail
-        // At surface (100m): ~5km coverage = 0.6m per texel (8192 resolution)
-        // At 10km altitude: ~20km coverage = 2.4m per texel
-        // At 100km altitude: ~100km coverage = 12m per texel
-        float baseSize = 5000.0f;  // 5km at surface
-        float altitudeFactor = 1.0f + (altitude / radius) * 3.0f;
-        float orthoSize = baseSize * altitudeFactor;
-
-        // Clamp to reasonable bounds
-        orthoSize = fmaxf(orthoSize, 2000.0f);        // Min 2km coverage
-        orthoSize = fminf(orthoSize, radius * 0.5f);  // Max quarter planet
-
-        // Position light relative to camera (not planet center!)
-        Vector3 lightPos = Vector3Add(shadowCenter, Vector3Scale(Vector3Negate(lightDir), orthoSize * 2.0f));
-        Matrix lightView = MatrixLookAt(lightPos, shadowCenter, (Vector3){0, 1, 0});
-
-        // Orthographic projection centered on camera-focused region
-        Matrix lightProjection = MatrixOrtho(-orthoSize, orthoSize, -orthoSize, orthoSize,
-                                             0.1f, orthoSize * 4.0f);
-        Matrix lightSpaceMatrix = MatrixMultiply(lightView, lightProjection);
-
-        // PASS 1: Render shadow map from light's perspective
-        SetShaderValueMatrix(shadowShader, shadowLightSpaceMatrixLoc, lightSpaceMatrix);
-        BeginTextureMode(shadowMap);
-            rlClearScreenBuffers(); // Clear color and depth
-            rlViewport(0, 0, 8192, 8192);
-            Planet_DrawWithShader(planet, shadowShader);
-        EndTextureMode();
+            BeginTextureMode(csm->cascades[i].shadowMap);
+                rlClearScreenBuffers();
+                rlViewport(0, 0, csm->shadowMapResolution, csm->shadowMapResolution);
+                Planet_DrawWithShader(planet, shadowShader);
+            EndTextureMode();
+        }
 
         // PASS 2: Normal rendering with shadows
-        SetShaderValueMatrix(lightingShader, lightSpaceMatrixLoc, lightSpaceMatrix);
-        // Set shadow map texture - we'll bind it manually in Chunk_Draw
-        // For now, we'll set the sampler to use texture unit 1
-        int shadowMapTextureUnit = 1;
-        SetShaderValue(lightingShader, shadowMapLoc, &shadowMapTextureUnit, SHADER_UNIFORM_INT);
+        
+        // Upload cascade data to shader
+        for (int i = 0; i < CASCADE_COUNT; i++) {
+             SetShaderValueMatrix(lightingShader, cascadeLightMatricesLocs[i], csm->cascades[i].lightSpaceMatrix);
+        }
+
+        float cascadeDistances[CASCADE_COUNT];
+        for (int i = 0; i < CASCADE_COUNT; i++) {
+            cascadeDistances[i] = csm->cascades[i].splitDistance;
+        }
+        SetShaderValueV(lightingShader, cascadeDistancesLoc,
+                       cascadeDistances, SHADER_UNIFORM_FLOAT, CASCADE_COUNT);
+        
+        // Set shadow map samplers (texture units 1, 2, 3, 4)
+        int samplers[CASCADE_COUNT] = {1, 2, 3, 4};
+        SetShaderValueV(lightingShader, cascadeShadowMapsLoc, samplers, SHADER_UNIFORM_INT, CASCADE_COUNT);
+
+        // Bind all cascade shadow maps
+        for (int i = 0; i < CASCADE_COUNT; i++) {
+            rlActiveTextureSlot(1 + i);
+            rlEnableTexture(csm->cascades[i].shadowMap.depth.id);
+        }
+
+        // Update view position
+        SetShaderValue(lightingShader, viewPosLoc, &camera.position, SHADER_UNIFORM_VEC3);
 
         // Draw
         BeginDrawing();
@@ -210,29 +248,34 @@ int main(void) {
 
             BeginMode3D(camera);
                 int triangles = Planet_Draw(planet);
-                // Grid at Earth scale (100 km spacing, 20 lines)
-                // DrawGrid(20, 100000.0f);
             EndMode3D();
+            
+            // Reset active texture to 0 to avoid messing up other things
+            rlActiveTextureSlot(0);
 
             DrawFPS(10, 10);
 
-            // Display altitude in appropriate units (altitude calculated earlier for shadow system)
-            if (altitude >= 1000.0f) {
-                DrawText(TextFormat("Altitude: %.1f km", altitude / 1000.0f), 10, 30, 20, LIME);
+            // Display altitude
+            float distFromCenter = Vector3Length(camera.position);
+            // Calculate radar altitude (height above actual terrain)
+            float terrainHeight = GetTerrainHeightAtPosition(camera.position, moonRadius, 18.0f, 0.003f);
+            float radarAltitude = distFromCenter - terrainHeight;
+
+            if (radarAltitude >= 1000.0f) {
+                DrawText(TextFormat("Altitude: %.1f km", radarAltitude / 1000.0f), 10, 40, 20, GREEN);
             } else {
-                DrawText(TextFormat("Altitude: %.0f m", altitude), 10, 30, 20, LIME);
+                DrawText(TextFormat("Altitude: %.0f m", radarAltitude), 10, 40, 20, GREEN);
             }
             
             // Display Speed
-            float speedPerSec = currentSpeed * 60.0f; // Assuming 60fps target for "per second" estimation or use GetFPS()
+            float speedPerSec = currentSpeed * 60.0f;
             if (speedPerSec >= 1000.0f) {
-                DrawText(TextFormat("Speed: %.1f km/s", speedPerSec / 1000.0f), 10, 50, 20, SKYBLUE);
+                DrawText(TextFormat("Speed: %.1f km/s", speedPerSec / 1000.0f), 10, 70, 20, SKYBLUE);
             } else {
-                DrawText(TextFormat("Speed: %.0f m/s", speedPerSec), 10, 50, 20, SKYBLUE);
+                DrawText(TextFormat("Speed: %.0f m/s", speedPerSec), 10, 70, 20, SKYBLUE);
             }
 
-            // Format triangles with commas
-            // Simple manual formatting for now
+            // Format triangles
             char triStr[32];
             if (triangles < 1000) sprintf(triStr, "%d", triangles);
             else if (triangles < 1000000) sprintf(triStr, "%d,%03d", triangles / 1000, triangles % 1000);
@@ -241,9 +284,12 @@ int main(void) {
             DrawText(TextFormat("Triangles: %s", triStr), 10, 70, 20, YELLOW);
 
             DrawText("WASD: Move | Q/E: Roll | Space/Ctrl: Up/Down | Shift: Fast | Wheel: Speed | F: Wireframe", 10, 100, 16, DARKGRAY);
+            
+            DrawCascadeDebugOverlay(csm, camera);
         EndDrawing();
     }
 
+    CSM_Destroy(csm);
     Planet_Free(planet);
     CloseWindow();
 

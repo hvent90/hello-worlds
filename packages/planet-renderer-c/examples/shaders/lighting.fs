@@ -1,60 +1,77 @@
 #version 330
 
-in vec3 fragNormal;
 in vec3 fragPosition;
-in vec4 fragPosLightSpace;
+in vec3 fragNormal;
+// in vec4 fragPosLightSpace; // Unused in CSM
+
 uniform vec4 colDiffuse;
 uniform vec3 lightDir;
 uniform vec3 viewPos;
-uniform sampler2D shadowMap;
+
+// CSM uniforms
+#define CASCADE_COUNT 4
+uniform sampler2D cascadeShadowMaps[CASCADE_COUNT];
+uniform mat4 cascadeLightMatrices[CASCADE_COUNT];
+uniform float cascadeDistances[CASCADE_COUNT];
+
 out vec4 finalColor;
 
-float ShadowCalculation(vec4 fragPosLight, vec3 normal, vec3 lightDirection) {
-    // Perform perspective divide
-    vec3 projCoords = fragPosLight.xyz / fragPosLight.w;
+int GetCascadeIndex(float distanceFromCamera) {
+    for (int i = 0; i < CASCADE_COUNT - 1; i++) {
+        if (distanceFromCamera < cascadeDistances[i]) {
+            return i;
+        }
+    }
+    return CASCADE_COUNT - 1;
+}
+
+float ShadowCalculationHard(int cascadeIndex, vec3 fragPos) {
+    // Transform fragment to light space for selected cascade
+    vec4 fragPosLightSpace = cascadeLightMatrices[cascadeIndex] * vec4(fragPos, 1.0);
+
+    // Perspective divide
+    vec3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w;
+
     // Transform to [0,1] range
     projCoords = projCoords * 0.5 + 0.5;
 
-    // Outside shadow map bounds = not in shadow
-    if(projCoords.z > 1.0 || projCoords.x < 0.0 || projCoords.x > 1.0 || projCoords.y < 0.0 || projCoords.y > 1.0)
+    // Outside shadow map bounds = no shadow
+    if (projCoords.x < 0.0 || projCoords.x > 1.0 ||
+        projCoords.y < 0.0 || projCoords.y > 1.0 ||
+        projCoords.z > 1.0 || projCoords.z < 0.0) {
         return 1.0;
+    }
 
-    // Get depth from shadow map
+    // Get closest depth from shadow map
+    float closestDepth = texture(cascadeShadowMaps[cascadeIndex], projCoords.xy).r;
     float currentDepth = projCoords.z;
 
-    // Bias adjusted for improved shadow resolution (8192x8192, 1.5x radius coverage)
-    // With ~300m per texel, smaller bias captures more terrain detail
-    float bias = max(0.001 * (1.0 - dot(normal, lightDirection)), 0.0005);
+    // Adaptive bias based on slope
+    float bias = max(0.0005 * (1.0 - dot(normalize(fragNormal), lightDir)), 0.00005);
 
-    // PCF (Percentage Closer Filtering) for soft shadows
-    float shadow = 0.0;
-    vec2 texelSize = 1.0 / vec2(textureSize(shadowMap, 0));
-    for(int x = -1; x <= 1; ++x) {
-        for(int y = -1; y <= 1; ++y) {
-            float pcfDepth = texture(shadowMap, projCoords.xy + vec2(x, y) * texelSize).r;
-            shadow += currentDepth - bias > pcfDepth ? 1.0 : 0.0;
-        }
-    }
-    shadow /= 9.0;
-
-    return 1.0 - shadow;
+    // Binary shadow test (HARD shadows, no PCF)
+    return (currentDepth - bias) > closestDepth ? 0.0 : 1.0;
 }
 
 void main() {
+    // Distance from camera
+    float distFromCamera = length(fragPosition - viewPos);
+
+    // Select cascade
+    int cascadeIndex = GetCascadeIndex(distFromCamera);
+
+    // Compute shadow
+    float shadow = ShadowCalculationHard(cascadeIndex, fragPosition);
+
+    // Lighting
     vec3 normal = normalize(fragNormal);
     vec3 lightDirection = normalize(lightDir);
 
-    // Ambient lighting (increased to make shadows visible against black background)
-    float ambient = 0.0;
+    float ambient = 0.0;  // PURE BLACK shadows (lunar aesthetic)
+    float diffuse = max(dot(normal, lightDirection), 0.0);
 
-    // Diffuse lighting
-    float diff = max(dot(normal, lightDirection), 0.0);
-
-    // Calculate shadow
-    float shadow = ShadowCalculation(fragPosLightSpace, normal, lightDirection);
-
-    // Combine lighting with shadow
-    float lighting = ambient + (diff * 0.7) * shadow;
+    // Shadow only affects diffuse (no ambient to shadow)
+    float lighting = ambient + (diffuse * shadow);
 
     finalColor = vec4(colDiffuse.rgb * lighting, colDiffuse.a);
 }
