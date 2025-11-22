@@ -226,7 +226,7 @@ int main(void) {
     camera.projection = CAMERA_PERSPECTIVE;
 
     // Create Earth-scale Moon
-    Planet* planet = Planet_Create(radius, 500.0f, 32, (Vector3){0, 0, 0}, 18.0f, 0.003f);
+    Planet* planet = Planet_Create(radius, 500.0f, 32, (Vector3){0, 0, 0}, 18.0f, 0.005f);
     // Moon colors: darker gray surface with subtle wireframe
     planet->surfaceColor = (Color){120, 120, 120, 255}; // Dark gray for moon surface
     planet->wireframeColor = (Color){80, 80, 80, 255}; // Darker gray wireframe
@@ -286,11 +286,11 @@ int main(void) {
 
         // Calculate radar altitude (height above actual terrain)
         float distFromCenter = Vector3Length(camera.position);
-        float terrainHeight = GetTerrainHeightAtPosition(camera.position, moonRadius, 18.0f, 0.003f);
+        float terrainHeight = GetTerrainHeightAtPosition(camera.position, moonRadius, 18.0f, 0.005f);
         float radarAltitude = distFromCenter - terrainHeight;
 
         // Update CSM
-        CSM_UpdateCascades(csm, camera, radius, 0.003f, radarAltitude);
+        CSM_UpdateCascades(csm, camera, radius, 0.005f, radarAltitude);
 
         // PASS 1: Render all cascade shadow maps
         for (int i = 0; i < CASCADE_COUNT; i++) {

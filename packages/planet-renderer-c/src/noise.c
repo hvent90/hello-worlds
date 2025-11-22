@@ -133,10 +133,12 @@ static float CraterProfile(float distance) {
     if (distance > 1.2f) return 0.0f; // Beyond ejecta blanket
 
     if (distance < 0.95f) {
-        // Bowl interior: parabolic shape
+        // Bowl interior: steeper parabolic shape for deep bowl look
         // Depth is maximum at center, rises toward rim
         float normalized = distance / 0.95f;
-        float bowlDepth = 1.0f - (normalized * normalized); // Parabolic
+        float bowlDepth = 1.0f - (normalized * normalized); // Parabolic bowl
+        // Make it steeper for smaller distances (deeper center)
+        bowlDepth = powf(bowlDepth, 0.8f); // Steeper sides
         return -bowlDepth; // Negative = depression
     } else if (distance < 1.05f) {
         // Raised rim (2-5% of crater diameter in height)
@@ -169,7 +171,36 @@ float CraterField(float x, float y, float scale, float intensity) {
 
     // Depth scales with crater size (larger craters are proportionally shallower)
     // Simple craters: ~12-20% depth-to-diameter ratio
-    float depthRatio = 0.18f - craterSize * 0.05f; // Larger = shallower ratio
+    // INCREASED DEPTH for dramatic shadows: ~50%
+    float depthRatio = 0.5f - craterSize * 0.15f; // Larger = shallower ratio
+
+    return craterHeight * depthRatio * intensity;
+}
+
+// Crater system with independent size control
+// frequency: controls distribution/density (higher = more craters)
+// sizeScale: controls crater diameter (higher = larger craters)
+// intensity: controls depth
+float CraterFieldSized(float x, float y, float frequency, float sizeScale, float intensity) {
+    float f1, f2;
+    WorleyNoise(x * frequency, y * frequency, &f1, &f2);
+
+    // Get crater size from cell (varies per crater)
+    int cellX = (int)floorf(x * frequency);
+    int cellY = (int)floorf(y * frequency);
+    float baseCraterSize = 0.3f + randomValue01(cellX, cellY) * 0.4f; // 0.3 to 0.7
+
+    // Apply independent size scaling
+    float craterSize = baseCraterSize * sizeScale;
+
+    // Calculate distance from crater center as ratio of crater size
+    float normalizedDist = f1 / craterSize;
+
+    // Apply crater profile
+    float craterHeight = CraterProfile(normalizedDist);
+
+    // Depth scales with crater size (larger craters are proportionally shallower)
+    float depthRatio = 0.5f - baseCraterSize * 0.15f; // Use base size for depth ratio
 
     return craterHeight * depthRatio * intensity;
 }
@@ -213,16 +244,23 @@ float MoonTerrain(float x, float y) {
     float baseElevation = highlandAmount * 0.3f - mariaAmount * 0.3f;
 
     // 3. Large impact basins (rare, very large features)
-    float largeCraters = CraterField(x, y, 0.15f, 1.8f); // Huge basins (>200km scale)
+    float largeCraters = CraterField(x, y, 0.15f, 3.0f); // Huge basins (>200km scale)
 
     // 4. Complex craters (20-200 km)
-    float complexCraters = CraterField(x, y, 0.5f, 1.2f);
+    float complexCraters = CraterField(x, y, 0.5f, 2.0f);
 
     // 5. Simple craters (1-20 km) - more numerous in highlands
     float simpleCraters = CraterField(x, y, 2.0f, 0.8f) * (0.5f + highlandAmount * 0.5f);
 
     // 6. Small craters (<1 km) - dense in highlands
     float smallCraters = CraterField(x, y, 8.0f, 0.4f) * (0.3f + highlandAmount * 0.7f);
+
+    // 6b. Tiny deep bowl craters (100-500m) - very deep and bowl-shaped
+    // NOW WITH INDEPENDENT CONTROLS:
+    // frequency: how many craters (try 10-30)
+    // sizeScale: how big each crater is (try 0.5-3.0)
+    // intensity: how deep (try 0.8-1.5)
+    float tinyBowlCraters = CraterFieldSized(x, y, 15.0f, 2.0f, 1.2f);
 
     // 7. Wrinkle ridges (only in maria)
     float ridges = WrinkleRidges(x, y) * mariaAmount;
@@ -239,10 +277,10 @@ float MoonTerrain(float x, float y) {
     // Base freq 18 * 30 = 540 -> ~6km wavelength
     // We need meter-scale detail. 
     // Add 2000x scale -> ~100m wavelength
-    float regolith = FBM(x * 1500.0f, y * 1500.0f, 3, 0.5f, 2.0f) * 0.005f;
+    float regolith = FBM(x * 30.0f, y * 30.0f, 3, 0.5f, 2.0f) * 0.005f;
     
     // 10. Micro-craters (high frequency)
-    float microCraters = CraterField(x, y, 200.0f, 0.2f);
+    // float microCraters = CraterField(x, y, 200.0f, 0.2f);
 
     // Combine all features
     float terrain = baseElevation
@@ -250,7 +288,8 @@ float MoonTerrain(float x, float y) {
                   + complexCraters * 0.8f
                   + simpleCraters * 0.6f
                   + smallCraters * 0.3f
-                  + microCraters
+                  // + tinyBowlCraters * 0.5f  // Deep bowl craters with strong contribution
+                  // + microCraters
                   + ridges
                   + highlandRoughness
                   + mariaRoughness
