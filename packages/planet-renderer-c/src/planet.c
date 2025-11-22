@@ -8,6 +8,12 @@ static void OnNodeSplit(QuadtreeNode* node) {
     // Empty for now, logic moved to Update
 }
 
+// Worker function for async chunk generation
+static void GenerateChunkWorker(void* data) {
+    Chunk* chunk = (Chunk*)data;
+    Chunk_GenerateAsync(chunk);
+}
+
 Planet* Planet_Create(float radius, float minCellSize, int minCellResolution, Vector3 origin, float terrainFrequency, float terrainAmplitude) {
     Planet* planet = (Planet*)malloc(sizeof(Planet));
     planet->radius = radius;
@@ -26,6 +32,9 @@ Planet* Planet_Create(float radius, float minCellSize, int minCellResolution, Ve
     // Initialize Chunk Map and Pool
     planet->chunkMap = ChunkMap_Create(1024); // Initial capacity
     planet->chunkPool = ChunkPool_Create(256); // Initial capacity
+
+    // Initialize Thread Pool (4 worker threads, similar to TypeScript implementation)
+    planet->threadPool = ThreadPool_Create(4);
 
     planet->surfaceColor = WHITE;
     planet->wireframeColor = BLACK;
@@ -97,18 +106,31 @@ void Planet_Update(Planet* planet, Vector3 cameraPosition) {
                 // Mesh needs regeneration
             }
             
-            // Generate Mesh (TODO: Optimize to only upload if needed, but for now we generate)
-            // We need to ensure we don't leak VRAM if we reuse a chunk that already has a mesh
-            // Chunk_Generate handles VRAM upload. 
-            // If it's a pooled chunk, it might already have buffers allocated? 
-            // For now, let Chunk_Generate handle it. Ideally we separate CPU generation from GPU upload.
-            Chunk_Generate(chunk);
-            
+            // Queue async generation for new chunk
+            pthread_mutex_lock(&chunk->stateMutex);
+            chunk->state = CHUNK_STATE_PENDING;
+            pthread_mutex_unlock(&chunk->stateMutex);
+
+            ThreadPool_Enqueue(planet->threadPool, GenerateChunkWorker, chunk);
+
             ChunkMap_Insert(newChunkMap, id, chunk);
             node->userData = chunk;
         }
     }
-    
+
+    // 4.5. Process chunks ready for upload (must be done on main thread)
+    // Iterate through all chunks in the new map and upload any that are ready
+    for (int i = 0; i < newChunkMap->capacity; i++) {
+        ChunkMapEntry* entry = newChunkMap->buckets[i];
+        while (entry) {
+            Chunk* chunk = entry->value;
+            if (Chunk_GetState(chunk) == CHUNK_STATE_READY_TO_UPLOAD) {
+                Chunk_UploadToGPU(chunk);
+            }
+            entry = entry->next;
+        }
+    }
+
     // 5. Recycle remaining chunks in old map
     // Anything left in planet->chunkMap is no longer visible
     for (int i = 0; i < planet->chunkMap->capacity; i++) {
@@ -182,14 +204,20 @@ int Planet_DrawWithShader(Planet* planet, Shader shader) {
 }
 
 void Planet_Free(Planet* planet) {
+    // Wait for all pending chunk generation to complete
+    ThreadPool_WaitAll(planet->threadPool);
+
+    // Destroy thread pool
+    ThreadPool_Destroy(planet->threadPool);
+
     // Free all chunks in map
     ChunkMap_Clear(planet->chunkMap); // We need to actually free the chunks, not just clear
     // Wait, ChunkMap_Clear just clears entries. We need to iterate and free.
     // Actually, let's just destroy the map and pool.
-    
+
     // The map contains active chunks. The pool contains inactive chunks.
     // We need to free ALL of them.
-    
+
     // 1. Free active chunks
     for (int i = 0; i < planet->chunkMap->capacity; i++) {
         ChunkMapEntry* entry = planet->chunkMap->buckets[i];
@@ -199,10 +227,10 @@ void Planet_Free(Planet* planet) {
         }
     }
     ChunkMap_Destroy(planet->chunkMap);
-    
+
     // 2. Free pooled chunks
     ChunkPool_Destroy(planet->chunkPool); // This frees the chunks in the pool
-    
+
     CubicQuadTree_Free(planet->quadtree);
     free(planet);
 }

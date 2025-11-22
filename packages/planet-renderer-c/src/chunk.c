@@ -23,6 +23,10 @@ Chunk* Chunk_Create(Vector3 offset, float width, float height, float radius, int
     chunk->mesh = (Mesh){ 0 };
     chunk->model = (Model){ 0 };
 
+    // Initialize async generation state
+    chunk->state = CHUNK_STATE_UNINITIALIZED;
+    pthread_mutex_init(&chunk->stateMutex, NULL);
+
     return chunk;
 }
 
@@ -256,16 +260,158 @@ void Chunk_DrawWithShadow(Chunk* chunk, Color surfaceColor, Color wireframeColor
     }
 }
 
+// Async generation - only generates mesh data on CPU (no GPU upload)
+// This can be safely called from worker threads
+void Chunk_GenerateAsync(Chunk* chunk) {
+    pthread_mutex_lock(&chunk->stateMutex);
+    chunk->state = CHUNK_STATE_GENERATING;
+    pthread_mutex_unlock(&chunk->stateMutex);
+
+    int res = chunk->resolution;
+    int numVertices = (res + 1) * (res + 1);
+    int numTriangles = res * res * 2;
+
+    // Check if we need to reallocate
+    if (chunk->mesh.vertexCount != numVertices) {
+        // Free old if exists
+        if (chunk->mesh.vertices) free(chunk->mesh.vertices);
+        if (chunk->mesh.normals) free(chunk->mesh.normals);
+        if (chunk->mesh.texcoords) free(chunk->mesh.texcoords);
+        if (chunk->mesh.indices) free(chunk->mesh.indices);
+
+        chunk->mesh.vertexCount = numVertices;
+        chunk->mesh.triangleCount = numTriangles;
+
+        chunk->mesh.vertices = (float*)malloc(chunk->mesh.vertexCount * 3 * sizeof(float));
+        chunk->mesh.normals = (float*)malloc(chunk->mesh.vertexCount * 3 * sizeof(float));
+        chunk->mesh.texcoords = (float*)malloc(chunk->mesh.vertexCount * 2 * sizeof(float));
+        chunk->mesh.indices = (unsigned short*)malloc(chunk->mesh.triangleCount * 3 * sizeof(unsigned short));
+    }
+
+    int vIndex = 0;
+    int tIndex = 0;
+
+    // Generate vertices (same as before)
+    for (int y = 0; y <= res; y++) {
+        for (int x = 0; x <= res; x++) {
+            float u = (float)x / res;
+            float v = (float)y / res;
+
+            float px = chunk->offset.x + u * chunk->width;
+            float py = chunk->offset.y + v * chunk->height;
+
+            Vector3 localPos = { px, py, 0 };
+            Vector3 worldPos = Vector3Transform(localPos, chunk->localToWorld);
+            Vector3 normalized = Vector3Normalize(worldPos);
+
+            float faceSizeTotal = 2.0f * chunk->radius;
+            float normalizedX = (px + chunk->radius) / faceSizeTotal;
+            float normalizedY = (py + chunk->radius) / faceSizeTotal;
+            float noiseX = normalizedX * chunk->terrainFrequency;
+            float noiseY = normalizedY * chunk->terrainFrequency;
+            float heightNoise = MoonTerrain(noiseX, noiseY);
+            float heightVariation = chunk->radius * chunk->terrainAmplitude * heightNoise;
+            float adjustedRadius = chunk->radius + heightVariation;
+
+            Vector3 finalPos = Vector3Add(Vector3Scale(normalized, adjustedRadius), chunk->origin);
+
+            chunk->mesh.vertices[vIndex * 3] = finalPos.x;
+            chunk->mesh.vertices[vIndex * 3 + 1] = finalPos.y;
+            chunk->mesh.vertices[vIndex * 3 + 2] = finalPos.z;
+
+            chunk->mesh.normals[vIndex * 3] = 0.0f;
+            chunk->mesh.normals[vIndex * 3 + 1] = 0.0f;
+            chunk->mesh.normals[vIndex * 3 + 2] = 0.0f;
+
+            chunk->mesh.texcoords[vIndex * 2] = u;
+            chunk->mesh.texcoords[vIndex * 2 + 1] = v;
+
+            // Indices
+            if (x < res && y < res) {
+                int topLeft = y * (res + 1) + x;
+                int topRight = topLeft + 1;
+                int bottomLeft = (y + 1) * (res + 1) + x;
+                int bottomRight = bottomLeft + 1;
+
+                chunk->mesh.indices[tIndex * 3] = topLeft;
+                chunk->mesh.indices[tIndex * 3 + 1] = topRight;
+                chunk->mesh.indices[tIndex * 3 + 2] = bottomLeft;
+
+                chunk->mesh.indices[tIndex * 3 + 3] = topRight;
+                chunk->mesh.indices[tIndex * 3 + 4] = bottomRight;
+                chunk->mesh.indices[tIndex * 3 + 5] = bottomLeft;
+
+                tIndex += 2;
+            }
+
+            vIndex++;
+        }
+    }
+
+    // Calculate normals
+    CalculateTerrainNormals(&chunk->mesh);
+
+    // Mark as ready for GPU upload
+    pthread_mutex_lock(&chunk->stateMutex);
+    chunk->state = CHUNK_STATE_READY_TO_UPLOAD;
+    pthread_mutex_unlock(&chunk->stateMutex);
+}
+
+// Upload mesh to GPU - must be called from main thread
+void Chunk_UploadToGPU(Chunk* chunk) {
+    pthread_mutex_lock(&chunk->stateMutex);
+
+    if (chunk->state != CHUNK_STATE_READY_TO_UPLOAD) {
+        pthread_mutex_unlock(&chunk->stateMutex);
+        return;
+    }
+
+    pthread_mutex_unlock(&chunk->stateMutex);
+
+    // Same GPU upload logic as before
+    if (chunk->isUploaded) {
+        if (chunk->model.meshes) {
+            chunk->model.meshes[0].vertices = NULL;
+            chunk->model.meshes[0].normals = NULL;
+            chunk->model.meshes[0].texcoords = NULL;
+            chunk->model.meshes[0].indices = NULL;
+        }
+
+        UnloadModel(chunk->model);
+
+        chunk->mesh.vaoId = 0;
+        chunk->mesh.vboId = 0;
+    }
+
+    UploadMesh(&chunk->mesh, false);
+    chunk->model = LoadModelFromMesh(chunk->mesh);
+    chunk->isUploaded = true;
+
+    pthread_mutex_lock(&chunk->stateMutex);
+    chunk->state = CHUNK_STATE_UPLOADED;
+    pthread_mutex_unlock(&chunk->stateMutex);
+}
+
+// Thread-safe state getter
+ChunkState Chunk_GetState(Chunk* chunk) {
+    pthread_mutex_lock(&chunk->stateMutex);
+    ChunkState state = chunk->state;
+    pthread_mutex_unlock(&chunk->stateMutex);
+    return state;
+}
+
 void Chunk_Free(Chunk* chunk) {
     if (chunk->isUploaded) {
         UnloadModel(chunk->model); // Unloads GPU data
     }
-    
+
     // Free CPU data
     if (chunk->mesh.vertices) free(chunk->mesh.vertices);
     if (chunk->mesh.normals) free(chunk->mesh.normals);
     if (chunk->mesh.texcoords) free(chunk->mesh.texcoords);
     if (chunk->mesh.indices) free(chunk->mesh.indices);
-    
+
+    pthread_mutex_destroy(&chunk->stateMutex);
+
     free(chunk);
 }

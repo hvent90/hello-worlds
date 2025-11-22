@@ -36,6 +36,9 @@ if (NOT raylib_FOUND)
     FetchContent_MakeAvailable(raylib)
 endif()
 
+# Find Threads package for pthread support
+find_package(Threads REQUIRED)
+
 # Planet renderer library
 add_library(planet_renderer
     src/math_utils.c
@@ -46,6 +49,7 @@ add_library(planet_renderer
     src/chunk_utils.c
     src/noise.c
     src/shadow.c
+    src/thread_pool.c
 )
 
 target_include_directories(planet_renderer PUBLIC
@@ -54,9 +58,9 @@ target_include_directories(planet_renderer PUBLIC
 
 # Link math library on Unix-like systems (not needed on Windows)
 if (UNIX)
-    target_link_libraries(planet_renderer PUBLIC raylib m)
+    target_link_libraries(planet_renderer PUBLIC raylib m Threads::Threads)
 else()
-    target_link_libraries(planet_renderer PUBLIC raylib)
+    target_link_libraries(planet_renderer PUBLIC raylib Threads::Threads)
 endif()
 
 # Simple planet example
