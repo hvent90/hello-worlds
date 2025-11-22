@@ -4,6 +4,7 @@
 #include <raymath.h>
 #include "rlgl.h"
 #include <stdio.h>
+#include "noise.h"
 
 
 float UpdateCameraFlight(Camera3D* camera) {
@@ -89,25 +90,108 @@ void DrawCascadeDebugOverlay(CascadedShadowMap* csm, Camera camera) {
 // Calculate exact terrain height at a given position
 // This duplicates the logic from Chunk_Generate to ensure the HUD matches the visual terrain
 float GetTerrainHeightAtPosition(Vector3 position, float planetRadius, float terrainFrequency, float terrainAmplitude) {
-    // Normalize to get direction vector (equivalent to projecting onto sphere)
+    // 1. Normalize to get direction vector
     Vector3 normalized = Vector3Normalize(position);
     
-    // Calculate UV/Noise coordinates
-    // We assume the camera is over the generated terrain (Z+ face)
-    // Project the camera position onto the cube face plane
-    
+    // 2. Determine which face we are on (Cube mapping)
+    float absX = fabsf(normalized.x);
+    float absY = fabsf(normalized.y);
     float absZ = fabsf(normalized.z);
-    if (absZ < 0.0001f) absZ = 0.0001f;
     
-    // Project to cube face at distance 'radius'
-    float projectionScale = planetRadius / absZ;
-    float px = normalized.x * projectionScale;
-    float py = normalized.y * projectionScale;
+    float maxAxis = absX;
+    if (absY > maxAxis) maxAxis = absY;
+    if (absZ > maxAxis) maxAxis = absZ;
     
-    // Now calculate noise
-    float faceSizeTotal = 2.0f * planetRadius;
-    float normalizedX = (px + planetRadius) / faceSizeTotal;
-    float normalizedY = (py + planetRadius) / faceSizeTotal;
+    // 3. Project to that face to get 2D coordinates
+    // We need to match the UV mapping used in Chunk_Generate
+    float u = 0.0f;
+    float v = 0.0f;
+    
+    // Avoid division by zero
+    if (maxAxis < 0.0001f) return planetRadius;
+    
+    // Unproject to cube surface (distance from center to cube face is radius)
+    // But we need the UVs on the face.
+    // Face size is 2.0 * radius.
+    // Range on face is [-radius, radius]
+    
+    // We can just use the normalized coordinates divided by the max axis to get range [-1, 1]
+    // Then map to [0, 1]
+    
+    if (absX >= absY && absX >= absZ) {
+        // X Face
+        // X is dominant. Y and Z are the UVs.
+        // We need to be careful about orientation to match the quadtree faces
+        // But for noise sampling, as long as it's continuous, it might be "good enough" for altitude
+        // However, to be EXACT, we should match the transforms in CubicQuadTree_Create
+        
+        // Let's use a simpler approach: 3D Noise?
+        // No, MoonTerrain is 2D.
+        
+        // Let's stick to the projection logic that matches the visual terrain.
+        // In Chunk_Generate:
+        // float px = chunk->offset.x + u * chunk->width;
+        // float py = chunk->offset.y + v * chunk->height;
+        // Vector3 localPos = { px, py, 0 };
+        // Vector3 worldPos = Vector3Transform(localPos, chunk->localToWorld);
+        
+        // We need to inverse this.
+        // It's complicated because we don't know WHICH chunk we are over easily without traversing the tree.
+        
+        // ALTERNATIVE:
+        // The noise function `MoonTerrain(x, y)` takes inputs that are derived from the face coordinates.
+        // normalizedX = (px + radius) / (2*radius)
+        // noiseX = normalizedX * freq
+        
+        // So we just need px and py on the face.
+        // px/py are in range [-radius, radius]
+        
+        if (normalized.x > 0) { // +X (Right)
+            // transforms[2] = MatrixMultiply(MatrixRotateY(PI / 2), MatrixTranslate(radius, 0, 0));
+            // Local Z+ becomes World X+. Local X+ becomes World Z-. Local Y+ becomes World Y+.
+            // So World Z is -Local X. World Y is Local Y.
+            u = -normalized.z / absX;
+            v = normalized.y / absX;
+        } else { // -X (Left)
+            // transforms[3] = MatrixMultiply(MatrixRotateY(-PI / 2), MatrixTranslate(-radius, 0, 0));
+            // Local Z+ becomes World X-. Local X+ becomes World Z+. Local Y+ becomes World Y+.
+            // So World Z is Local X. World Y is Local Y.
+            u = normalized.z / absX;
+            v = normalized.y / absX;
+        }
+    } else if (absY >= absX && absY >= absZ) {
+        // Y Face
+        if (normalized.y > 0) { // +Y (Top)
+            // transforms[0] = MatrixMultiply(MatrixRotateX(-PI / 2), MatrixTranslate(0, radius, 0));
+            // Local Z+ becomes World Y+. Local Y+ becomes World Z-. Local X+ becomes World X+.
+            // So World X is Local X. World Z is -Local Y.
+            u = normalized.x / absY;
+            v = -normalized.z / absY;
+        } else { // -Y (Bottom)
+            // transforms[1] = MatrixMultiply(MatrixRotateX(PI / 2), MatrixTranslate(0, -radius, 0));
+            // Local Z+ becomes World Y-. Local Y+ becomes World Z+. Local X+ becomes World X+.
+            // So World X is Local X. World Z is Local Y.
+            u = normalized.x / absY;
+            v = normalized.z / absY;
+        }
+    } else {
+        // Z Face
+        if (normalized.z > 0) { // +Z (Front)
+            // transforms[4] = MatrixTranslate(0, 0, radius);
+            // Local Z+ is World Z+. Local X is World X. Local Y is World Y.
+            u = normalized.x / absZ;
+            v = normalized.y / absZ;
+        } else { // -Z (Back)
+            // transforms[5] = MatrixMultiply(MatrixRotateY(PI), MatrixTranslate(0, 0, -radius));
+            // Local Z+ is World Z-. Local X is -World X. Local Y is World Y.
+            u = -normalized.x / absZ;
+            v = normalized.y / absZ;
+        }
+    }
+    
+    // Convert [-1, 1] to [0, 1]
+    float normalizedX = (u + 1.0f) * 0.5f;
+    float normalizedY = (v + 1.0f) * 0.5f;
     
     float noiseX = normalizedX * terrainFrequency;
     float noiseY = normalizedY * terrainFrequency;
