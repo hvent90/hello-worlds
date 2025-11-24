@@ -46,6 +46,8 @@ add_executable(planet_example
         examples/planet_example.c
         src/mesh.c
         src/noise.c
+        src/shadow.c
+        src/camera.c
 )
 
 # Include directories
