@@ -140,16 +140,17 @@ int main(void) {
     Color lightColor = WHITE;
     Vector4 lightColorNormalized = ColorNormalize(lightColor);
 
+    const float lightViewDistance = 150.0f;
     Camera3D lightCamera = {0};
     lightCamera.position = Vector3Scale(lightDir, -200.0f);
     lightCamera.target = Vector3Zero();
     lightCamera.projection = CAMERA_ORTHOGRAPHIC;
     lightCamera.up = (Vector3){0.0f, 1.0f, 0.0f};
-    lightCamera.fovy = 200.0f;
+    lightCamera.fovy = lightViewDistance;
 
     SetTargetFPS(60);
 
-    const float scale = 100.0f;
+    const float scale = 2000.0f;
 
     // Create meshes
     const Mesh plane_mesh = create_plane_mesh_with_noise(scale, 100);
@@ -241,6 +242,7 @@ int main(void) {
         }
 
         // ===== PASS 1: Render shadow map from light's perspective =====
+        rlSetClipPlanes(.1, 10000);
         BeginTextureMode(shadowMap);
         ClearBackground(WHITE);
 
@@ -255,6 +257,9 @@ int main(void) {
         lightViewProj = MatrixMultiply(lightView, lightProj);
 
         // ===== PASS 2: Render main scene with shadows =====
+        // Set clip planes for Earth-scale rendering
+        // Near: 1 km, Far: 100,000 km (to see the whole planet from space)
+        rlSetClipPlanes(.1, 100000000.0);
         BeginDrawing();
         ClearBackground(BLACK);
 
