@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell.exe:*)",
+      "Bash(cat:*)",
+      "Bash(pwsh ./build.ps1)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
