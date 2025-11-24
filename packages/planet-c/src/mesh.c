@@ -80,15 +80,16 @@ Mesh create_plane_mesh_with_noise(float scale, int resolution) {
         UploadMesh(&plane_mesh, false);
         if (plane_mesh.vaoId == 0) {
             fprintf(stderr, "Mesh upload may have failed\n");
+            // Clean up on upload failure
+            free(vertices);
+            free(indices);
+            free(normals);
             plane_mesh = (Mesh){0};
         }
+        // NOTE: Don't free vertices/indices/normals here - UnloadMesh() will handle it
     } else {
         fprintf(stderr, "Quad memory allocation failed\n");
     }
-
-    free(vertices);
-    free(indices);
-    free(normals);
 
     return plane_mesh;
 }
@@ -150,15 +151,16 @@ Mesh create_plane_mesh(float scale, int resolution) {
         UploadMesh(&plane_mesh, false);
         if (plane_mesh.vaoId == 0) {
             fprintf(stderr, "Mesh upload may have failed\n");
+            // Clean up on upload failure
+            free(vertices);
+            free(indices);
+            free(normals);
             plane_mesh = (Mesh){0};
         }
+        // NOTE: Don't free vertices/indices/normals here - UnloadMesh() will handle it
     } else {
         fprintf(stderr, "Quad memory allocation failed\n");
     }
-
-    free(vertices);
-    free(indices);
-    free(normals);
 
     return plane_mesh;
 }
@@ -207,10 +209,7 @@ Mesh create_triangle_mesh(float scale) {
     // Upload to GPU
     UploadMesh(&triangle_mesh, false);
 
-    // Free CPU copies (GPU has them now)
-    free(vertices);
-    free(normals);
-    free(indices);
+    // NOTE: Don't free vertices/indices/normals here - UnloadMesh() will handle it
 
     return triangle_mesh;
 }

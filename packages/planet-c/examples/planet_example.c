@@ -4,65 +4,125 @@
 #include <rlgl.h>
 #include "../src/mesh.h"
 
+#define SHADOWMAP_RESOLUTION 1024
+
+// Load render texture for shadowmap projection
+static RenderTexture2D LoadShadowmapRenderTexture(int width, int height)
+{
+    RenderTexture2D target = { 0 };
+
+    target.id = rlLoadFramebuffer(); // Load an empty framebuffer
+    target.texture.width = width;
+    target.texture.height = height;
+
+    if (target.id > 0)
+    {
+        rlEnableFramebuffer(target.id);
+
+        // Create depth texture
+        target.depth.id = rlLoadTextureDepth(width, height, false);
+        target.depth.width = width;
+        target.depth.height = height;
+        target.depth.format = 19; // DEPTH_COMPONENT_24BIT?
+        target.depth.mipmaps = 1;
+
+        // Attach depth texture to FBO
+        rlFramebufferAttach(target.id, target.depth.id, RL_ATTACHMENT_DEPTH, RL_ATTACHMENT_TEXTURE2D, 0);
+
+        // Check if fbo is complete with attachments (valid)
+        if (rlFramebufferComplete(target.id)) TRACELOG(LOG_INFO, "FBO: [ID %i] Framebuffer object created successfully", target.id);
+
+        rlDisableFramebuffer();
+    }
+    else TRACELOG(LOG_WARNING, "FBO: Framebuffer object can not be created");
+
+    return target;
+}
+
+// Draw full scene projecting shadows
+static void DrawScene(Mesh planeMesh, Mesh sphereMesh, Material material)
+{
+    DrawMesh(planeMesh, material, MatrixIdentity());
+    DrawMesh(sphereMesh, material, MatrixTranslate(0.0f, 10.0f, 40.0f));
+}
 
 int main(void) {
   const int screenWidth = 1280;
   const int screenHeight = 720;
 
-  InitWindow(screenWidth, screenHeight, "Planet Renderer");
+  InitWindow(screenWidth, screenHeight, "Planet Renderer - Shadows");
   DisableCursor();
 
-  rlSetClipPlanes(0.1, 10000000.0);
-
   Camera3D camera = { 0 };
-  camera.position = (Vector3){ 0.0f, 10.0f, 100.0f };
+  camera.position = (Vector3){ 0.0f, 30.0f, 100.0f };
   camera.target = (Vector3){ 0.0f, 0.0f, 0.0f };
   camera.up = (Vector3){ 0.0f, 1.0f, 0.0f };
   camera.fovy = 45.0f;
   camera.projection = CAMERA_PERSPECTIVE;
 
-  // Set up a camera from the light's perspective
-  Vector3 lightDir = (Vector3){ -0.5f, 1.0f, -0.5f };
-  lightDir = Vector3Normalize(lightDir);
+  // Set up light direction and camera
+  Vector3 lightDir = Vector3Normalize((Vector3){ 3.95f, -1.0f, 1.35f });
+  Color lightColor = WHITE;
+  Vector4 lightColorNormalized = ColorNormalize(lightColor);
+
   Camera3D lightCamera = { 0 };
-  lightCamera.position = Vector3Scale(lightDir, -200.0f);  // Position behind light
-  lightCamera.target = (Vector3){0.0f, 0.0f, 0.0f};        // Looking at center
-  lightCamera.up = (Vector3){0.0f, 1.0f, 0.0f};
-  lightCamera.fovy = 45.0f;
-  lightCamera.projection = CAMERA_ORTHOGRAPHIC;  // Orthographic for directional light
+  lightCamera.position = Vector3Scale(lightDir, -200.0f);
+  lightCamera.target = Vector3Zero();
+  lightCamera.projection = CAMERA_ORTHOGRAPHIC;
+  lightCamera.up = (Vector3){ 0.0f, 1.0f, 0.0f };
+  lightCamera.fovy = 200.0f;
 
   SetTargetFPS(60);
 
   const float scale = 100.0f;
 
+  // Create meshes
   const Mesh plane_mesh = create_plane_mesh_with_noise(scale, 100);
-  const RenderTexture2D shadowMap = LoadRenderTexture(2048, 2048);
-  const Shader shadowShader = LoadShader("build/shaders/shadow.vs", "build/shaders/shadow.fs");
-  if (shadowShader.id == 0) {
-    printf("ERROR: Failed to load shadow shader!\n");
-  }
-  const Shader depthShader = LoadShader("build/shaders/shadow_depth.vs", "build/shaders/shadow_depth.fs");
-  if (depthShader.id == 0) {
-    printf("ERROR: Failed to load depth shader!\n");
+  Mesh sphere_mesh = GenMeshSphere(5.0f, 16, 16);
+
+  // Load shadow map render texture
+  const RenderTexture2D shadowMap = LoadShadowmapRenderTexture(SHADOWMAP_RESOLUTION, SHADOWMAP_RESOLUTION);
+  if (shadowMap.id == 0) {
+    printf("ERROR: Failed to load shadow map render texture!\n");
+    CloseWindow();
+    return -1;
   }
 
+  // Load shadow shader
+  const Shader shadowShader = LoadShader("build/shaders/shadowmap.vs", "build/shaders/shadowmap.fs");
+  if (shadowShader.id == 0) {
+    printf("ERROR: Failed to load shadow shader!\n");
+    CloseWindow();
+    return -1;
+  }
+
+  // Set up shader uniforms
+  shadowShader.locs[SHADER_LOC_VECTOR_VIEW] = GetShaderLocation(shadowShader, "viewPos");
+  
+  int lightDirLoc = GetShaderLocation(shadowShader, "lightDir");
+  int lightColLoc = GetShaderLocation(shadowShader, "lightColor");
+  int ambientLoc = GetShaderLocation(shadowShader, "ambient");
+  int lightVPLoc = GetShaderLocation(shadowShader, "lightVP");
+  int shadowMapLoc = GetShaderLocation(shadowShader, "shadowMap");
+  
+  SetShaderValue(shadowShader, lightDirLoc, &lightDir, SHADER_UNIFORM_VEC3);
+  SetShaderValue(shadowShader, lightColLoc, &lightColorNormalized, SHADER_UNIFORM_VEC4);
+  
+  float ambient[4] = {0.1f, 0.1f, 0.1f, 1.0f};
+  SetShaderValue(shadowShader, ambientLoc, ambient, SHADER_UNIFORM_VEC4);
+  
+  int shadowMapResolution = SHADOWMAP_RESOLUTION;
+  SetShaderValue(shadowShader, GetShaderLocation(shadowShader, "shadowMapResolution"), &shadowMapResolution, SHADER_UNIFORM_INT);
+
+  // Create material
   Material shadowMaterial = LoadMaterialDefault();
   shadowMaterial.shader = shadowShader;
 
-  Material depthMaterial = LoadMaterialDefault();
-  depthMaterial.shader = depthShader;
-
-  // Compute light matrix for shadow calculations
-  Matrix lightView = MatrixLookAt(lightCamera.position, lightCamera.target, lightCamera.up);
-  Matrix lightProjection = MatrixOrtho(-200.0f, 200.0f, -200.0f, 200.0f, 0.1f, 1000.0f);
-  Matrix lightMatrix = MatrixMultiply(lightView, lightProjection);
-
-  int lightMatrixLoc = GetShaderLocation(shadowMaterial.shader, "lightMatrix");
-  SetShaderValueMatrix(shadowMaterial.shader, lightMatrixLoc, lightMatrix);
-
-  int shadowMapLoc = GetShaderLocation(shadowMaterial.shader, "shadowMap");
-  int shadowMapSlot = 1;
-  SetShaderValue(shadowMaterial.shader, shadowMapLoc, &shadowMapSlot, SHADER_UNIFORM_INT);
+  // Store light matrices
+  Matrix lightView = { 0 };
+  Matrix lightProj = { 0 };
+  Matrix lightViewProj = { 0 };
+  int textureActiveSlot = 10;
 
   bool wireframe = false;
 
@@ -71,43 +131,83 @@ int main(void) {
       wireframe = !wireframe;
     }
 
+    float deltaTime = GetFrameTime();
+
+    // Update camera position for shader
+    Vector3 cameraPos = camera.position;
+    SetShaderValue(shadowShader, shadowShader.locs[SHADER_LOC_VECTOR_VIEW], &cameraPos, SHADER_UNIFORM_VEC3);
+    UpdateCamera(&camera, CAMERA_FIRST_PERSON);
+
+    // Move light with arrow keys
+    const float cameraSpeed = 0.05f;
+    if (IsKeyDown(KEY_LEFT))
+    {
+        if (lightDir.x < 0.6f) lightDir.x += cameraSpeed*60.0f*deltaTime;
+    }
+    if (IsKeyDown(KEY_RIGHT))
+    {
+        if (lightDir.x > -0.6f) lightDir.x -= cameraSpeed*60.0f*deltaTime;
+    }
+    if (IsKeyDown(KEY_UP))
+    {
+        if (lightDir.z < 0.6f) lightDir.z += cameraSpeed*60.0f*deltaTime;
+    }
+    if (IsKeyDown(KEY_DOWN))
+    {
+        if (lightDir.z > -0.6f) lightDir.z -= cameraSpeed*60.0f*deltaTime;
+    }
+
+    lightDir = Vector3Normalize(lightDir);
+    lightCamera.position = Vector3Scale(lightDir, -200.0f);
+    SetShaderValue(shadowShader, lightDirLoc, &lightDir, SHADER_UNIFORM_VEC3);
+
     if (wireframe) {
       rlEnableWireMode();
     }
 
-    UpdateCamera(&camera, CAMERA_FIRST_PERSON);
-
-    BeginDrawing();
-    ClearBackground(BLACK);
-
-    // ===== STEP 1: RENDER SHADOW MAP (light's perspective) =====
+    // ===== PASS 1: Render shadow map from light's perspective =====
     BeginTextureMode(shadowMap);
-      rlClearScreenBuffers();
-      rlViewport(0, 0, 2048, 2048);
+      ClearBackground(WHITE);
+      
       BeginMode3D(lightCamera);
-        DrawMesh(plane_mesh, depthMaterial, MatrixIdentity());
+        lightView = rlGetMatrixModelview();
+        lightProj = rlGetMatrixProjection();
+        DrawScene(plane_mesh, sphere_mesh, shadowMaterial);
       EndMode3D();
+      
     EndTextureMode();
-    rlViewport(0, 0, screenWidth, screenHeight);
+    
+    lightViewProj = MatrixMultiply(lightView, lightProj);
 
-    // Bind shadow map to texture slot 1
-    rlActiveTextureSlot(1);
-    rlEnableTexture(shadowMap.depth.id);
-    rlActiveTextureSlot(0);
+    // ===== PASS 2: Render main scene with shadows =====
+    BeginDrawing();
+      ClearBackground(BLACK);
 
-    // ===== STEP 2: RENDER MAIN SCENE (camera's perspective) =====
-    BeginMode3D(camera);
-      DrawMesh(plane_mesh, shadowMaterial, MatrixIdentity());
-    EndMode3D();
+      SetShaderValueMatrix(shadowShader, lightVPLoc, lightViewProj);
+      rlEnableShader(shadowShader.id);
 
-    // ===== STEP 3: DRAW UI TEXT =====
-    DrawText("WASD to move, Mouse to look", 10, 10, 20, RAYWHITE);
+      rlActiveTextureSlot(textureActiveSlot);
+      rlEnableTexture(shadowMap.depth.id);
+      rlSetUniform(shadowMapLoc, &textureActiveSlot, SHADER_UNIFORM_INT, 1);
+
+      BeginMode3D(camera);
+        DrawScene(plane_mesh, sphere_mesh, shadowMaterial);
+      EndMode3D();
+
+      DrawText("WASD to move, Mouse to look", 10, 10, 20, RAYWHITE);
+      DrawText("Arrow keys to rotate light", 10, 30, 20, RAYWHITE);
+      
     EndDrawing();
 
     if (wireframe) {
       rlDisableWireMode();
     }
   }
+
+  UnloadShader(shadowShader);
+  UnloadMesh(plane_mesh);
+  UnloadMesh(sphere_mesh);
+  UnloadRenderTexture(shadowMap);
 
   CloseWindow();
 
