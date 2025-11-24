@@ -46,7 +46,7 @@ float UpdateCameraMovement(Camera3D *camera, const float deltaTime) {
     static float roll = 0.0f;
     static float movementSpeed = 50.0f;
     const float minSpeed = 1.0f;
-    const float maxSpeed = 500.0f;
+    const float maxSpeed = 500000.0f;
     const float mouseSensitivity = 0.1f;
     const float rollSpeed = 60.0f; // Degrees per second
 
@@ -140,12 +140,11 @@ int main(void) {
 
 
     // ===== Create Meshes ====
-    const float scale = 200.0f;
+    const float scale = 1700000.0f;
     const Mesh plane_mesh = create_plane_mesh_with_noise(scale, 100);
     Mesh sphere_mesh = GenMeshSphere(5.0f, 16, 16);
 
-    // foo
-    // ===== Shadow maps =====
+    // ===== Shadow maps ===== ffffffff
     // Set up the light direction
     Vector3 lightDir = Vector3Normalize((Vector3){3.95f, -1.0f, 1.35f});
     Color lightColor = WHITE;
@@ -195,7 +194,13 @@ int main(void) {
     float ambient[4] = {0.1f, 0.1f, 0.1f, 1.0f};
     SetShaderValue(shadowShader, ambientLoc, ambient, SHADER_UNIFORM_VEC4);
 
-    SetShaderValueV(shadowShader, cascadeSplitsLoc, cascadeSplits, SHADER_UNIFORM_FLOAT, CASCADE_COUNT + 1);
+    // Set cascade splits individually to ensure correct array handling
+    for (int i = 0; i < CASCADE_COUNT + 1; i++) {
+        char locName[32];
+        sprintf(locName, "cascadeSplits[%d]", i);
+        int loc = GetShaderLocation(shadowShader, locName);
+        SetShaderValue(shadowShader, loc, &cascadeSplits[i], SHADER_UNIFORM_FLOAT);
+    }
 
     int shadowMapResolution = SHADOWMAP_RESOLUTION;
     SetShaderValue(shadowShader, GetShaderLocation(shadowShader, "shadowMapResolution"), &shadowMapResolution,
@@ -267,19 +272,20 @@ int main(void) {
         // Update light cameras for each cascade
         for (unsigned short i = 0; i < CASCADE_COUNT; i++) {
             // Calculate coverage area for this cascade based on split distances
-            // For orthographic projection, fovy determines the height of the view volume
-            // We scale by the cascade's max distance to cover the appropriate area
             float cascadeDistance = cascadeSplits[i + 1]; // End distance of this cascade
 
-            // Scale the coverage based on cascade difference
-            // Start with a base coverage and scale it up for distant cascades
-            float coverageScale = cascadeDistance / 500.0f; // 500m as base reference
-            lightCameras[i].fovy = lightViewDistance * coverageScale;
+            // For orthographic projection, fovy determines the height of the view volume
+            // We need to ensure it covers the view frustum slice at this distance
+            // A rough approximation is to use the cascade distance itself as the coverage size
+            lightCameras[i].fovy = cascadeDistance * 2.0f; // Ensure plenty of coverage
 
+            // Position the light camera far enough back to see potential casters (e.g. mountains)
+            // The "back" distance needs to scale with the cascade size
+            float backDistance = cascadeDistance * 2.0f;
+            
             // For now, all cascades follow the camera (camerea-relative)
-            // We'll make cascade 3 planet-relative later
             lightCameras[i].target = lookAheadTarget;
-            lightCameras[i].position = Vector3Add(lookAheadTarget, Vector3Scale(lightDir, -200.0f));
+            lightCameras[i].position = Vector3Add(lookAheadTarget, Vector3Scale(lightDir, -backDistance));
         }
         SetShaderValue(shadowShader, lightDirLoc, &lightDir, SHADER_UNIFORM_VEC3);
 
@@ -317,8 +323,12 @@ int main(void) {
         ClearBackground(BLACK);
 
         // Set all cascade matrices
+        // Set all cascade matrices
         for (unsigned short i = 0; i < CASCADE_COUNT; i++) {
-            SetShaderValueMatrix(shadowShader, lightVPsLoc + i, lightViewProjs[i]);
+            char locName[32];
+            sprintf(locName, "lightVPs[%d]", i);
+            int loc = GetShaderLocation(shadowShader, locName);
+            SetShaderValueMatrix(shadowShader, loc, lightViewProjs[i]);
         }
         rlEnableShader(shadowShader.id);
 
@@ -330,8 +340,11 @@ int main(void) {
             rlEnableTexture(shadowMaps[i].depth.id);
 
             // Set uniform for each cascade's sampler
-            // shadowMaps[i] in shader corresponds to shadowMapsLoc + i
-            rlSetUniform(shadowMapsLoc + i, &textureSlot, SHADER_UNIFORM_INT, 1);
+            // Explicitly query location for each array element
+            char locName[32];
+            sprintf(locName, "shadowMaps[%d]", i);
+            int loc = GetShaderLocation(shadowShader, locName);
+            rlSetUniform(loc, &textureSlot, SHADER_UNIFORM_INT, 1);
         }
 
         BeginMode3D(camera);

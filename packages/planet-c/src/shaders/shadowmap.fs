@@ -56,23 +56,41 @@ void main()
     float specular = pow(specAngle, 32.0); // Lower shininess for smoother transitions
 
     // Shadow calculations
-    vec4 fragPosLightSpace = lightVPs[cascadeIndex] * vec4(fragPosition, 1);
+    // Normal Offset Bias: Push position along normal to avoid self-shadowing on slopes
+    // This is more effective than simple depth bias for terrain.
+    float normalOffsetScale = 10.0 * (1.0 - dot(normal, l)); // Scale based on slope
+    vec3 shadowPos = fragPosition + (normal * normalOffsetScale * (cascadeSplits[cascadeIndex+1] / 1000.0));
+
+    vec4 fragPosLightSpace = lightVPs[cascadeIndex] * vec4(shadowPos, 1);
     fragPosLightSpace.xyz /= fragPosLightSpace.w;
     fragPosLightSpace.xyz = (fragPosLightSpace.xyz + 1.0) / 2.0;
     vec2 sampleCoords = fragPosLightSpace.xy;
     float curDepth = fragPosLightSpace.z;
 
     // Slope-scale depth bias (increased to eliminate shadow acne)
-    float bias = max(0.002 * (1.0 - dot(normal, l)), 0.0005);
+    float bias = max(0.0005 * (1.0 - dot(normal, l)), 0.00005);
+    
+    // Scale bias based on cascade index (gentler scaling than distance)
+    // Precision drops with larger cascades, so we increase bias.
+    // 1.0, 3.0, 9.0, 27.0
+    bias *= pow(3.0, float(cascadeIndex));
     int shadowCounter = 0;
     const int numSamples = 9;
     
     vec2 texelSize = vec2(1.0 / float(shadowMapResolution));
+    // Manual loop unrolling for GLSL 330 sampler indexing
     for (int x = -1; x <= 1; x++)
     {
         for (int y = -1; y <= 1; y++)
         {
-            float sampleDepth = texture(shadowMaps[cascadeIndex], sampleCoords + texelSize * vec2(x, y)).r;
+            float sampleDepth = 0.0;
+            vec2 offset = vec2(x, y) * texelSize;
+            
+            if (cascadeIndex == 0) sampleDepth = texture(shadowMaps[0], sampleCoords + offset).r;
+            else if (cascadeIndex == 1) sampleDepth = texture(shadowMaps[1], sampleCoords + offset).r;
+            else if (cascadeIndex == 2) sampleDepth = texture(shadowMaps[2], sampleCoords + offset).r;
+            else if (cascadeIndex == 3) sampleDepth = texture(shadowMaps[3], sampleCoords + offset).r;
+
             if (curDepth - bias > sampleDepth)
             {
                 shadowCounter++;
@@ -98,16 +116,6 @@ void main()
     vec3 color = ambientComponent + diffuseComponent + specularComponent;
     finalColor = vec4(color, 1.0) * colDiffuse;
 
-    // DEBUG: Colorize by cascade
-      vec3 cascadeColors[4];
-      cascadeColors[0] = vec3(1.0, 0.0, 0.0);  // Red - cascade 0 (closest)
-      cascadeColors[1] = vec3(0.0, 1.0, 0.0);  // Green - cascade 1
-      cascadeColors[2] = vec3(0.0, 0.0, 1.0);  // Blue - cascade 2
-      cascadeColors[3] = vec3(1.0, 1.0, 0.0);  // Yellow - cascade 3 (farthest)
-      color = mix(color, cascadeColors[cascadeIndex], 0.3);  // Blend 30% cascade color
-
-      finalColor = vec4(color, 1.0) * colDiffuse;
-
     // Gamma correction
-//     finalColor = pow(finalColor, vec4(1.0/2.2));
+    finalColor = pow(finalColor, vec4(1.0/2.2));
 }

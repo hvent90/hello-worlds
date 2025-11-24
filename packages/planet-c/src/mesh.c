@@ -21,7 +21,7 @@ Mesh create_plane_mesh_with_noise(float scale, int resolution) {
                 const int idx = z * (resolution + 1) + x;
                 const float xPos = (x / (float)resolution) * 2.0f * scale - scale;
                 const float zPos = (z / (float)resolution) * 2.0f * scale - scale;
-                vertices[idx] = (Vector3){xPos, evaluate_noise(xPos, zPos, 0.10f, 10.0f), zPos};
+                vertices[idx] = (Vector3){xPos, evaluate_noise(xPos, zPos, 0.0001f, 26000.0f), zPos};
             }
         }
 
