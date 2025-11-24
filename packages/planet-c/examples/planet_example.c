@@ -141,12 +141,19 @@ int main(void) {
 
     // ===== Create Meshes ====
     const float scale = 1700000.0f;
-    const Mesh plane_mesh = create_plane_mesh_with_noise(scale, 100);
+    const Mesh plane_mesh = create_plane_mesh_with_noise(scale, 200);
     Mesh sphere_mesh = GenMeshSphere(5.0f, 16, 16);
 
     // ===== Shadow maps ===== ffffffff
     // Set up the light direction
-    Vector3 lightDir = Vector3Normalize((Vector3){3.95f, -1.0f, 1.35f});
+    float lightYaw = 120.0f;
+    float lightPitch = -25.0f;
+    Vector3 lightDir = {
+        cosf(lightPitch * DEG2RAD) * cosf(lightYaw * DEG2RAD),
+        sinf(lightPitch * DEG2RAD),
+        cosf(lightPitch * DEG2RAD) * sinf(lightYaw * DEG2RAD)
+    };
+    lightDir = Vector3Normalize(lightDir);
     Color lightColor = WHITE;
     Vector4 lightColorNormalized = ColorNormalize(lightColor);
 
@@ -191,7 +198,8 @@ int main(void) {
     SetShaderValue(shadowShader, lightDirLoc, &lightDir, SHADER_UNIFORM_VEC3);
     SetShaderValue(shadowShader, lightColLoc, &lightColorNormalized, SHADER_UNIFORM_VEC4);
 
-    float ambient[4] = {0.1f, 0.1f, 0.1f, 1.0f};
+    // float ambient[4] = {0.1f, 0.1f, 0.1f, 1.0f};
+    float ambient[4] = {0.0f, 0.0f, 0.0f, 1.0f};
     SetShaderValue(shadowShader, ambientLoc, ambient, SHADER_UNIFORM_VEC4);
 
     // Set cascade splits individually to ensure correct array handling
@@ -244,20 +252,22 @@ int main(void) {
         UpdateCameraMovement(&camera, deltaTime);
 
         // Move light with arrow keys
-        const float cameraSpeed = 0.05f;
-        if (IsKeyDown(KEY_LEFT)) {
-            if (lightDir.x < 0.6f) lightDir.x += cameraSpeed * 60.0f * deltaTime;
-        }
-        if (IsKeyDown(KEY_RIGHT)) {
-            if (lightDir.x > -0.6f) lightDir.x -= cameraSpeed * 60.0f * deltaTime;
-        }
-        if (IsKeyDown(KEY_UP)) {
-            if (lightDir.z < 0.6f) lightDir.z += cameraSpeed * 60.0f * deltaTime;
-        }
-        if (IsKeyDown(KEY_DOWN)) {
-            if (lightDir.z > -0.6f) lightDir.z -= cameraSpeed * 60.0f * deltaTime;
-        }
+        const float lightRotateSpeed = 60.0f;
+        if (IsKeyDown(KEY_LEFT)) lightYaw += lightRotateSpeed * deltaTime;
+        if (IsKeyDown(KEY_RIGHT)) lightYaw -= lightRotateSpeed * deltaTime;
+        if (IsKeyDown(KEY_UP)) lightPitch += lightRotateSpeed * deltaTime;
+        if (IsKeyDown(KEY_DOWN)) lightPitch -= lightRotateSpeed * deltaTime;
 
+        // Clamp pitch to avoid flipping
+        if (lightPitch > 89.0f) lightPitch = 89.0f;
+        if (lightPitch < -89.0f) lightPitch = -89.0f;
+
+        // Recalculate light direction
+        lightDir = (Vector3){
+            cosf(lightPitch * DEG2RAD) * cosf(lightYaw * DEG2RAD),
+            sinf(lightPitch * DEG2RAD),
+            cosf(lightPitch * DEG2RAD) * sinf(lightYaw * DEG2RAD)
+        };
         lightDir = Vector3Normalize(lightDir);
 
         // Make light camera shadow map coverage shift based on view direction
