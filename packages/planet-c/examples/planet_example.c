@@ -140,7 +140,7 @@ int main(void) {
     Color lightColor = WHITE;
     Vector4 lightColorNormalized = ColorNormalize(lightColor);
 
-    const float lightViewDistance = 150.0f;
+    const float lightViewDistance = 128.0f;
     Camera3D lightCamera = {0};
     lightCamera.position = Vector3Scale(lightDir, -200.0f);
     lightCamera.target = Vector3Zero();
@@ -232,9 +232,17 @@ int main(void) {
 
         lightDir = Vector3Normalize(lightDir);
 
-        // Make Light camera follow player
-        lightCamera.target = camera.position;
-        lightCamera.position = Vector3Add(camera.position, Vector3Scale(lightDir, -200.0f));
+        // Make light camera shadow map coverage shift based on view direction
+        Vector3 viewDir = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
+        float alignment = Vector3DotProduct(viewDir, lightDir);  // -1 to 1
+
+        // Shift shadow map coverage forward when looking away from light
+        // Small multiplier (0.2) to keep most coverage near player
+        float lookAheadDistance = (1.0f - alignment) * 0.2f * lightViewDistance;
+
+        Vector3 lookAheadTarget = Vector3Add(camera.position, Vector3Scale(viewDir, lookAheadDistance));
+        lightCamera.target = lookAheadTarget;
+        lightCamera.position = Vector3Add(lookAheadTarget, Vector3Scale(lightDir, -200.0f));
         SetShaderValue(shadowShader, lightDirLoc, &lightDir, SHADER_UNIFORM_VEC3);
 
         if (wireframe) {
@@ -244,14 +252,13 @@ int main(void) {
         // ===== PASS 1: Render shadow map from light's perspective =====
         rlSetClipPlanes(.1, 10000);
         BeginTextureMode(shadowMap);
-        ClearBackground(WHITE);
+            ClearBackground(WHITE);
 
-        BeginMode3D(lightCamera);
-        lightView = rlGetMatrixModelview();
-        lightProj = rlGetMatrixProjection();
-        DrawScene(plane_mesh, sphere_mesh, shadowMaterial);
-        EndMode3D();
-
+            BeginMode3D(lightCamera);
+                lightView = rlGetMatrixModelview();
+                lightProj = rlGetMatrixProjection();
+                DrawScene(plane_mesh, sphere_mesh, shadowMaterial);
+            EndMode3D();
         EndTextureMode();
 
         lightViewProj = MatrixMultiply(lightView, lightProj);
