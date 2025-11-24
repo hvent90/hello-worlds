@@ -129,6 +129,7 @@ int main(void) {
     InitWindow(screenWidth, screenHeight, "Planet Renderer - Shadows");
     SetTargetFPS(60);
     DisableCursor();
+    ToggleBorderlessWindowed();
 
     // ===== Set up Player Camera ====
     Camera3D camera = {0};
