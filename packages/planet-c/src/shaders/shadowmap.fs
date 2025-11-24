@@ -20,8 +20,9 @@ uniform vec4 ambient;
 uniform vec3 viewPos;
 
 // Input shadowmapping values
-uniform mat4 lightVP;
-uniform sampler2D shadowMap;
+uniform mat4 lightVPs[4];
+uniform sampler2D shadowMaps[4];
+uniform float cascadeSplits[5];
 uniform int shadowMapResolution;
 
 void main()
@@ -29,19 +30,33 @@ void main()
     // Texel color fetching from texture sampler
     vec4 texelColor = texture(texture0, fragTexCoord);
     vec3 normal = normalize(fragNormal);
-    vec3 viewD = normalize(viewPos - fragPosition);
+
+    // Diffuse lighting
+    vec3 viewDirection = normalize(viewPos - fragPosition);
     vec3 l = -lightDir;
+
+    // Calculate view-space depth for cascade selection
+    float viewDepth = length(viewPos - fragPosition);
+
+    // Select cascade based on view depth
+    int cascadeIndex = 0;
+    for (int i = 0; i < 4; i++) {
+        if (viewDepth < cascadeSplits[i + 1]) {
+            cascadeIndex = i;
+            break;
+        }
+    }
 
     // Diffuse lighting
     float NdotL = max(dot(normal, l), 0.0);
     
     // Specular lighting (Blinn-Phong)
-    vec3 halfDir = normalize(l + viewD);
+    vec3 halfDir = normalize(l + viewDirection);
     float specAngle = max(dot(halfDir, normal), 0.0);
     float specular = pow(specAngle, 32.0); // Lower shininess for smoother transitions
 
     // Shadow calculations
-    vec4 fragPosLightSpace = lightVP * vec4(fragPosition, 1);
+    vec4 fragPosLightSpace = lightVPs[cascadeIndex] * vec4(fragPosition, 1);
     fragPosLightSpace.xyz /= fragPosLightSpace.w;
     fragPosLightSpace.xyz = (fragPosLightSpace.xyz + 1.0) / 2.0;
     vec2 sampleCoords = fragPosLightSpace.xy;
@@ -57,7 +72,7 @@ void main()
     {
         for (int y = -1; y <= 1; y++)
         {
-            float sampleDepth = texture(shadowMap, sampleCoords + texelSize * vec2(x, y)).r;
+            float sampleDepth = texture(shadowMaps[cascadeIndex], sampleCoords + texelSize * vec2(x, y)).r;
             if (curDepth - bias > sampleDepth)
             {
                 shadowCounter++;
@@ -83,6 +98,16 @@ void main()
     vec3 color = ambientComponent + diffuseComponent + specularComponent;
     finalColor = vec4(color, 1.0) * colDiffuse;
 
+    // DEBUG: Colorize by cascade
+      vec3 cascadeColors[4];
+      cascadeColors[0] = vec3(1.0, 0.0, 0.0);  // Red - cascade 0 (closest)
+      cascadeColors[1] = vec3(0.0, 1.0, 0.0);  // Green - cascade 1
+      cascadeColors[2] = vec3(0.0, 0.0, 1.0);  // Blue - cascade 2
+      cascadeColors[3] = vec3(1.0, 1.0, 0.0);  // Yellow - cascade 3 (farthest)
+      color = mix(color, cascadeColors[cascadeIndex], 0.3);  // Blend 30% cascade color
+
+      finalColor = vec4(color, 1.0) * colDiffuse;
+
     // Gamma correction
-    finalColor = pow(finalColor, vec4(1.0/2.2));
+//     finalColor = pow(finalColor, vec4(1.0/2.2));
 }
