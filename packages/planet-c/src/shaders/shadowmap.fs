@@ -65,8 +65,13 @@ void main()
         }
     }
     
-    // If outside shadow map range, don't shadow
-    if(fragPosLightSpace.z > 1.0) shadowCounter = 0;
+    // If outside shadow map range, treat as fully lit (no shadow)
+    if(fragPosLightSpace.z > 1.0 || fragPosLightSpace.z < 0.0 ||
+       sampleCoords.x < 0.0 || sampleCoords.x > 1.0 ||
+       sampleCoords.y < 0.0 || sampleCoords.y > 1.0)
+    {
+        shadowCounter = 0;
+    }
     
     float shadow = 1.0 - (float(shadowCounter) / float(numSamples));
 
