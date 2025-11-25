@@ -270,7 +270,7 @@ int main(void) {
     DrawText("WASD to move, Mouse to look", 10, 10, 20, RAYWHITE);
     DrawText("Arrow keys to rotate light", 10, 30, 20, RAYWHITE);
 
-    draw_ui_text_box((Vector2){10, 50}, "Performance",
+    draw_ui_text_box((Vector2){10, 60}, "Performance",
                      (UiTextItem[]){{"Frame time", "16.7ms"}}, 1, BLUE,
                      RAYWHITE, 20);
 

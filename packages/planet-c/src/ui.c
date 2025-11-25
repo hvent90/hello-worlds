@@ -30,17 +30,18 @@ float draw_ui_text_box(Vector2 position, // top-left corner
   int box_width = max_int(min_box_width, title_header_width);
   int box_right_x = position.x + box_width;
 
-  DrawLineEx(position, (Vector2){position.x + 10, position.y}, 5, title_color);
+  float top_line_y = position.y + font_size * 0.55f;
+
+  DrawLineEx((Vector2){position.x, top_line_y},
+             (Vector2){position.x + 10, top_line_y}, 5, title_color);
   DrawText(title, position.x + 15, position.y, font_size, title_color);
-  DrawLineEx((Vector2){position.x + 15 + titleTextWidth + 5, position.y},
-             (Vector2){box_right_x, position.y}, 5, title_color);
+  DrawLineEx((Vector2){position.x + 15 + titleTextWidth + 5, top_line_y},
+             (Vector2){box_right_x, top_line_y}, 5, title_color);
   height += font_size;
 
   float box_top_y = position.y + font_size + 5;
   float box_height = (PADDING * 2) + (item_count * font_size) +
                      ((item_count - 1) * ITEM_SPACING);
-
-  DrawRectangleLines(position.x, box_top_y, box_width, box_height, title_color);
 
   int current_y = box_top_y + PADDING;
   for (unsigned short i = 0; i < item_count; i++) {
@@ -49,6 +50,18 @@ float draw_ui_text_box(Vector2 position, // top-left corner
     DrawText(item_text, position.x + PADDING, current_y, font_size, text_color);
     current_y += font_size + ITEM_SPACING;
   }
+
+  // title_color); Left line
+  DrawLineEx((Vector2){position.x, top_line_y},
+             (Vector2){position.x, current_y + PADDING}, 5, title_color);
+  // Right line
+  DrawLineEx((Vector2){position.x + box_width, top_line_y},
+             (Vector2){position.x + box_width, current_y + PADDING}, 5,
+             title_color);
+  // Bottom line
+  DrawLineEx((Vector2){position.x, current_y + PADDING},
+             (Vector2){position.x + box_width, current_y + PADDING}, 5,
+             title_color);
 
   height = font_size + 5 + box_height;
 
