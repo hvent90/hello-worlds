@@ -48,6 +48,7 @@ add_executable(planet_example
         src/noise.c
         src/shadow.c
         src/camera.c
+        src/ui.c
 )
 
 # Include directories

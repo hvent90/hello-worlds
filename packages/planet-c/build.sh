@@ -110,3 +110,5 @@ echo -e "Executable: ${GREEN}$BUILD_DIR/planet_example${NC}"
 echo ""
 echo "To run:"
 echo "  ./$BUILD_DIR/planet_example"
+
+./build/planet_example

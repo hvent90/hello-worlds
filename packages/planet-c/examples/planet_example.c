@@ -1,6 +1,7 @@
 #include "../src/camera.h"
 #include "../src/mesh.h"
 #include "../src/shadow.h"
+#include "../src/ui.h"
 #include <raylib.h>
 #include <raymath.h>
 #include <rlgl.h>
@@ -18,7 +19,7 @@ int main(void) {
   const int screenHeight = 720;
   InitWindow(screenWidth, screenHeight, "Planet Renderer - Shadows");
   SetTargetFPS(60);
-  DisableCursor();
+  SetMouseCursor(MOUSE_CURSOR_CROSSHAIR);
   ToggleBorderlessWindowed();
 
   // ===== Set up Player Camera ====
@@ -268,6 +269,10 @@ int main(void) {
 
     DrawText("WASD to move, Mouse to look", 10, 10, 20, RAYWHITE);
     DrawText("Arrow keys to rotate light", 10, 30, 20, RAYWHITE);
+
+    draw_ui_text_box((Vector2){10, 50}, "Performance",
+                     (UiTextItem[]){{"Frame time", "16.7ms"}}, 1, BLUE,
+                     RAYWHITE, 20);
 
     EndDrawing();
 
