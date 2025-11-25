@@ -32,11 +32,11 @@ float draw_ui_text_box(Vector2 position, // top-left corner
 
   float top_line_y = position.y + font_size * 0.55f;
 
-  DrawLineEx((Vector2){position.x, top_line_y},
+  DrawLineEx((Vector2){position.x - 2.5, top_line_y},
              (Vector2){position.x + 10, top_line_y}, 5, title_color);
   DrawText(title, position.x + 15, position.y, font_size, title_color);
   DrawLineEx((Vector2){position.x + 15 + titleTextWidth + 5, top_line_y},
-             (Vector2){box_right_x, top_line_y}, 5, title_color);
+             (Vector2){box_right_x + 2.5, top_line_y}, 5, title_color);
   height += font_size;
 
   float box_top_y = position.y + font_size + 5;
@@ -51,7 +51,7 @@ float draw_ui_text_box(Vector2 position, // top-left corner
     current_y += font_size + ITEM_SPACING;
   }
 
-  // title_color); Left line
+  // Left Line
   DrawLineEx((Vector2){position.x, top_line_y},
              (Vector2){position.x, current_y + PADDING}, 5, title_color);
   // Right line
@@ -59,8 +59,8 @@ float draw_ui_text_box(Vector2 position, // top-left corner
              (Vector2){position.x + box_width, current_y + PADDING}, 5,
              title_color);
   // Bottom line
-  DrawLineEx((Vector2){position.x, current_y + PADDING},
-             (Vector2){position.x + box_width, current_y + PADDING}, 5,
+  DrawLineEx((Vector2){position.x - 2.5, current_y + PADDING},
+             (Vector2){position.x + box_width + 2.5, current_y + PADDING}, 5,
              title_color);
 
   height = font_size + 5 + box_height;
