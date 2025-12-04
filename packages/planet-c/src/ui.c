@@ -19,8 +19,8 @@ float draw_ui_text_box(Vector2 position, // top-left corner
   int largestTextWidth = 0;
   char item_text[256];
   for (unsigned short i = 0; i < item_count; i++) {
-    snprintf(item_text, sizeof(item_text), "%s: %s", items[i].label,
-             items[i].value);
+    snprintf(item_text, sizeof(item_text), "%s: %f%s", items[i].label,
+             items[i].value, items[i].unit);
     largestTextWidth =
         max_int(largestTextWidth, MeasureText(item_text, font_size));
   }
@@ -45,8 +45,8 @@ float draw_ui_text_box(Vector2 position, // top-left corner
 
   int current_y = box_top_y + PADDING;
   for (unsigned short i = 0; i < item_count; i++) {
-    snprintf(item_text, sizeof(item_text), "%s: %s", items[i].label,
-             items[i].value);
+    snprintf(item_text, sizeof(item_text), "%s: %f%s", items[i].label,
+             items[i].value, items[i].unit);
     DrawText(item_text, position.x + PADDING, current_y, font_size, text_color);
     current_y += font_size + ITEM_SPACING;
   }

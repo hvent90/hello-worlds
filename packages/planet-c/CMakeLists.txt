@@ -39,8 +39,6 @@ if (NOT raylib_FOUND)
     FetchContent_MakeAvailable(raylib)
 endif()
 
-
-
 # Simple planet example
 add_executable(planet_example
         examples/planet_example.c
@@ -51,8 +49,19 @@ add_executable(planet_example
         src/ui.c
 )
 
+# Quadtree Debugger
+add_executable(quadtree_example
+  examples/quadtree/quadtree.c)
+
 # Include directories
 target_include_directories(planet_example PRIVATE src)
+
+# Link libraries for quadtree_example
+if (UNIX)
+    target_link_libraries(quadtree_example PRIVATE m raylib)
+else()
+    target_link_libraries(quadtree_example PRIVATE raylib)
+endif()
 
 # Link math library on Unix-like systems (not needed on Windows)
 if (UNIX)

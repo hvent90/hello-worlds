@@ -2,6 +2,9 @@
 Explain concepts, architecture, and design decisions clearly and directly. Provide recommendations grounded in the long-term vision. Avoid leading pedagogical questions ("What do you think?", "Should we...?") unless there's genuine technical ambiguity that requires clarification. Only ask questions when you need actual user input or clarification—not to guide learning.
 
 Do not write code unless asked.
+
+## Vim/Editor Assistance
+The user is learning vim, specifically using LazyVim (built on top of Neovim), and is a novice. When helping with editing tasks, provide precise vim commands and motions to accomplish tasks in the most efficient manner. Be explicit about key sequences, modes, and navigation.
 </instructions>
 
 <project>

@@ -5,7 +5,8 @@
 
 typedef struct {
   const char *label; // e.g., "Shadow maps"
-  const char *value; // e.g., "1.2ms"
+  double value;      // e.g., "1.2"
+  const char *unit;  // e.g., "s"
 } UiTextItem;
 
 // Returns the total height of the drawn box (useful for stacking multiple

@@ -6,6 +6,7 @@
 #include <raymath.h>
 #include <rlgl.h>
 #include <stdio.h>
+#include <time.h>
 
 // Draw full scene projecting shadows
 static void DrawScene(Mesh planeMesh, Mesh sphereMesh, Material material) {
@@ -14,12 +15,14 @@ static void DrawScene(Mesh planeMesh, Mesh sphereMesh, Material material) {
 }
 
 int main(void) {
+  const long start_time = clock();
+
   // ===== Raylib Init =====
   const int screenWidth = 1280;
   const int screenHeight = 720;
   InitWindow(screenWidth, screenHeight, "Planet Renderer - Shadows");
   SetTargetFPS(60);
-  SetMouseCursor(MOUSE_CURSOR_CROSSHAIR);
+  DisableCursor();
   ToggleBorderlessWindowed();
 
   // ===== Set up Player Camera ====
@@ -133,8 +136,21 @@ int main(void) {
   // ===== Misc Options =====
   bool wireframe = false;
 
+  double last_profiler_time = GetTime();
+  UiTextItem profiler_items[2] = {0};
+  profiler_items[0].label = "FPS";
+  profiler_items[0].unit = "";
+  profiler_items[1].label = "Shadow maps";
+  profiler_items[1].unit = "ms";
+
   // ===== Main Render Loop =====
   while (!WindowShouldClose()) {
+    bool update_profiler_items = GetTime() - last_profiler_time > 1.0f;
+    if (update_profiler_items) {
+      last_profiler_time = GetTime();
+      profiler_items[0].value = GetFPS();
+    }
+
     if (IsKeyPressed(KEY_F)) {
       wireframe = !wireframe;
     }
@@ -211,6 +227,7 @@ int main(void) {
     }
 
     // ===== PASS 1: Render shadow map from light's perspective =====
+    const double shadow_map_start = GetTime();
     for (unsigned short i = 0; i < CASCADE_COUNT; i++) {
       // Set clip planes appropriate for this cascade's range
       float cascadeRange = cascadeSplits[i + 1] - cascadeSplits[i];
@@ -230,6 +247,10 @@ int main(void) {
 
       lightViewProjs[i] = MatrixMultiply(lightViews[i], lightProjs[i]);
     }
+    double shadow_map_time = GetTime() - shadow_map_start;
+    if (update_profiler_items) {
+      // profiler_items[1].value = shadow_map_time * 1000.0f;
+    }
 
     // ===== PASS 2: Render main scene with shadows =====
     // Set clip planes for Earth-scale rendering
@@ -238,7 +259,6 @@ int main(void) {
     BeginDrawing();
     ClearBackground(BLACK);
 
-    // Set all cascade matrices
     // Set all cascade matrices
     for (unsigned short i = 0; i < CASCADE_COUNT; i++) {
       char locName[32];
@@ -270,8 +290,7 @@ int main(void) {
     DrawText("WASD to move, Mouse to look", 10, 10, 20, RAYWHITE);
     DrawText("Arrow keys to rotate light", 10, 30, 20, RAYWHITE);
 
-    draw_ui_text_box((Vector2){10, 60}, "Performance",
-                     (UiTextItem[]){{"Frame time", "16.7ms"}}, 1, BLUE,
+    draw_ui_text_box((Vector2){10, 60}, "Performance", profiler_items, 2, BLUE,
                      RAYWHITE, 20);
 
     EndDrawing();
@@ -289,6 +308,8 @@ int main(void) {
     UnloadRenderTexture(shadowMaps[i]);
   }
 
+  double elapsed_time = GetTime();
+  printf("Time elapsed: %f", elapsed_time);
   CloseWindow();
 
   return 0;
