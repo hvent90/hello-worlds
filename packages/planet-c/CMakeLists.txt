@@ -51,16 +51,26 @@ add_executable(planet_example
 
 # Quadtree Debugger
 add_executable(quadtree_example
-  examples/quadtree/quadtree.c)
+  examples/quadtree/quadtree.c
+  src/quadtree.c)
+
+add_executable(quadtree_mesh
+  examples/quadtree/quadtree_mesh.c
+  src/quadtree.c
+  src/mesh.c)
 
 # Include directories
 target_include_directories(planet_example PRIVATE src)
+target_include_directories(quadtree_example PRIVATE src)
+target_include_directories(quadtree_mesh PRIVATE src)
 
 # Link libraries for quadtree_example
 if (UNIX)
     target_link_libraries(quadtree_example PRIVATE m raylib)
+    target_link_libraries(quadtree_mesh PRIVATE m raylib)
 else()
     target_link_libraries(quadtree_example PRIVATE raylib)
+    target_link_libraries(quadtree_mesh PRIVATE raylib)
 endif()
 
 # Link math library on Unix-like systems (not needed on Windows)
