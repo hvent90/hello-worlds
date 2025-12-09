@@ -89,6 +89,11 @@ add_custom_command(TARGET planet_example POST_BUILD
         ${CMAKE_SOURCE_DIR}/src/shaders
         ${CMAKE_BINARY_DIR}/shaders)
 
+add_custom_command(TARGET quadtree_mesh POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_SOURCE_DIR}/src/shaders
+        ${CMAKE_BINARY_DIR}/shaders)
+
 # Installation
 install(TARGETS planet_example
     RUNTIME DESTINATION bin

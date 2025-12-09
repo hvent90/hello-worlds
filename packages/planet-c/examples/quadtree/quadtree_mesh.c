@@ -5,14 +5,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 // clang-format off
-#include "../src/shadow.h"
-#include "../src/camera.h"
+#include "shadow.h"
+#include "camera.h"
 #include "quadtree.h"
 #include "mesh.h"
 // clang-format on
 
 const float MAX_SCALE = 1700000.0f;
-const int MAX_DEPTH = 16;
+const int MAX_DEPTH = 8;
 
 typedef struct {
   Mesh mesh;
@@ -259,7 +259,7 @@ int main(void) {
 
   // Load shadow shader
   const Shader shadowShader =
-      LoadShader("build/shaders/shadowmap.vs", "build/shaders/shadowmap.fs");
+      LoadShader("shaders/shadowmap.vs", "shaders/shadowmap.fs");
   if (shadowShader.id == 0) {
     CloseWindow();
     return -1;
@@ -432,36 +432,30 @@ int main(void) {
     // Set clip planes for Earth-scale rendering
     // Near: 1 km, Far: 100,000 km (to see the whole planet from space)
     rlSetClipPlanes(.1, 100000000.0);
+
     BeginDrawing();
     ClearBackground(BLACK);
 
-    // Set all cascade matrices
+    // Set all cascade light view-projection matrices
     for (unsigned short i = 0; i < CASCADE_COUNT; i++) {
       char locName[32];
-      sprintf(locName, "shadowMaps[%d]", i);
+      sprintf(locName, "lightVPs[%d]", i);
       int loc = GetShaderLocation(shadowShader, locName);
       SetShaderValueMatrix(shadowShader, loc, lightViewProjs[i]);
     }
-    rlEnableShader(shadowShader.id);
 
     // Bind all cascade shadow maps to texture slots
-    int textureSlots[CASCADE_COUNT] = {10, 11, 12, 13};
     for (unsigned short i = 0; i < CASCADE_COUNT; i++) {
       int textureSlot = 10 + i; // Use slots 10, 11, 12, 13
       rlActiveTextureSlot(textureSlot);
       rlEnableTexture(shadowMaps[i].depth.id);
 
       // Set uniform for each cascade's sampler
-      // Explicitly query location for each array element
       char locName[32];
       sprintf(locName, "shadowMaps[%d]", i);
       int loc = GetShaderLocation(shadowShader, locName);
       rlSetUniform(loc, &textureSlot, SHADER_UNIFORM_INT, 1);
     }
-
-    // ===== Rendering =====
-    BeginDrawing();
-    ClearBackground(BLACK);
 
     BeginMode3D(camera);
 
