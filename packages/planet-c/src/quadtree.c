@@ -1,6 +1,8 @@
+// clang-format off
 #include <raylib.h>
-#include <raymath.h>
+// clang-format on
 #include "quadtree.h"
+#include <raymath.h>
 #include <stdlib.h>
 
 QuadTreeNode *create_quadtree_node(float x, float y, float width, float height,
@@ -41,7 +43,8 @@ void delete_quadtree_node(QuadTreeNode *node,
 }
 
 void subdivide_quadtree_node(QuadTreeNode *node,
-                             QuadTreeUserDataCreateFunc create_child_data) {
+                             QuadTreeUserDataCreateFunc create_child_data,
+                             QuadTreeUserDataCleanupFunc cleanup_parent_data) {
   if (node == NULL) {
     return;
   }
@@ -65,17 +68,32 @@ void subdivide_quadtree_node(QuadTreeNode *node,
           create_child_data(node, node->children[i], node->user_data);
     }
   }
+
+  // Clean up parent's user data since it's no longer a leaf
+  if (cleanup_parent_data && node->user_data) {
+    cleanup_parent_data(node->user_data);
+    node->user_data = NULL;
+  }
 }
 
 void merge_quadtree_node(QuadTreeNode *node,
-                         QuadTreeUserDataCleanupFunc cleanup) {
+                         QuadTreeUserDataCleanupFunc cleanup,
+                         QuadTreeUserDataRecreateFunc recreate_parent_data) {
   if (node == NULL || node->parent == NULL) {
     return;
   }
 
+  QuadTreeNode *parent = node->parent;
+
+  // Delete all children
   for (unsigned short i = 0; i < 4; i++) {
-    delete_quadtree_node(node->parent->children[i], cleanup);
-    node->parent->children[i] = NULL;
+    delete_quadtree_node(parent->children[i], cleanup);
+    parent->children[i] = NULL;
+  }
+
+  // Recreate parent's user data since it's now a leaf again
+  if (recreate_parent_data) {
+    parent->user_data = recreate_parent_data(parent);
   }
 }
 
@@ -101,7 +119,8 @@ QuadTreeNode *find_quadtree_node_at_point(QuadTreeNode *node, int x, int y) {
 }
 
 void process_leaf_nodes(QuadTreeNode *node, Vector2 point, int max_depth,
-                       QuadTreeUserDataCreateFunc create_child_data) {
+                        QuadTreeUserDataCreateFunc create_child_data,
+                        QuadTreeUserDataCleanupFunc cleanup_parent_data) {
   if (node == NULL) {
     return;
   }
@@ -110,7 +129,8 @@ void process_leaf_nodes(QuadTreeNode *node, Vector2 point, int max_depth,
 
   if (!is_leaf) {
     for (unsigned short i = 0; i < 4; i++) {
-      process_leaf_nodes(node->children[i], point, max_depth, create_child_data);
+      process_leaf_nodes(node->children[i], point, max_depth, create_child_data,
+                         cleanup_parent_data);
     }
 
     return;
@@ -123,12 +143,13 @@ void process_leaf_nodes(QuadTreeNode *node, Vector2 point, int max_depth,
 
   // Check for subdivision
   if (node->depth < max_depth && distance < subdivide_distance) {
-    subdivide_quadtree_node(node, create_child_data);
+    subdivide_quadtree_node(node, create_child_data, cleanup_parent_data);
   }
 }
 
 void merge_distant_leaves(QuadTreeNode *node, Vector2 point,
-                         QuadTreeUserDataCleanupFunc cleanup) {
+                          QuadTreeUserDataCleanupFunc cleanup,
+                          QuadTreeUserDataRecreateFunc recreate_parent_data) {
   if (node == NULL) {
     return;
   }
@@ -140,7 +161,8 @@ void merge_distant_leaves(QuadTreeNode *node, Vector2 point,
 
   // Recurse into children first
   for (unsigned short i = 0; i < 4; i++) {
-    merge_distant_leaves(node->children[i], point, cleanup);
+    merge_distant_leaves(node->children[i], point, cleanup,
+                         recreate_parent_data);
   }
 
   // Make sure all children are leaves
@@ -150,7 +172,7 @@ void merge_distant_leaves(QuadTreeNode *node, Vector2 point,
     }
   }
 
-  const float merge_distance = node->width * 1.1;
+  const float merge_distance = node->width * 1.1f;
 
   for (unsigned short i = 0; i < 4; i++) {
     const float distance = Vector2Distance(
@@ -163,5 +185,5 @@ void merge_distant_leaves(QuadTreeNode *node, Vector2 point,
     }
   }
 
-  merge_quadtree_node(node->children[0], cleanup);
+  merge_quadtree_node(node->children[0], cleanup, recreate_parent_data);
 }

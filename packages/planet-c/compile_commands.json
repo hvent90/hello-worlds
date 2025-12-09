@@ -1,0 +1,86 @@
+[
+{
+  "directory": "/home/hv/CLionProjects/hello-worlds/packages/planet-c",
+  "command": "/usr/bin/cc  -I/home/hv/CLionProjects/hello-worlds/packages/planet-c/src -O3 -DNDEBUG -std=gnu99 -I/usr/include -o CMakeFiles/planet_example.dir/examples/planet_example.c.o -c /home/hv/CLionProjects/hello-worlds/packages/planet-c/examples/planet_example.c",
+  "file": "/home/hv/CLionProjects/hello-worlds/packages/planet-c/examples/planet_example.c",
+  "output": "CMakeFiles/planet_example.dir/examples/planet_example.c.o"
+},
+{
+  "directory": "/home/hv/CLionProjects/hello-worlds/packages/planet-c",
+  "command": "/usr/bin/cc  -I/home/hv/CLionProjects/hello-worlds/packages/planet-c/src -O3 -DNDEBUG -std=gnu99 -I/usr/include -o CMakeFiles/planet_example.dir/src/mesh.c.o -c /home/hv/CLionProjects/hello-worlds/packages/planet-c/src/mesh.c",
+  "file": "/home/hv/CLionProjects/hello-worlds/packages/planet-c/src/mesh.c",
+  "output": "CMakeFiles/planet_example.dir/src/mesh.c.o"
+},
+{
+  "directory": "/home/hv/CLionProjects/hello-worlds/packages/planet-c",
+  "command": "/usr/bin/cc  -I/home/hv/CLionProjects/hello-worlds/packages/planet-c/src -O3 -DNDEBUG -std=gnu99 -I/usr/include -o CMakeFiles/planet_example.dir/src/noise.c.o -c /home/hv/CLionProjects/hello-worlds/packages/planet-c/src/noise.c",
+  "file": "/home/hv/CLionProjects/hello-worlds/packages/planet-c/src/noise.c",
+  "output": "CMakeFiles/planet_example.dir/src/noise.c.o"
+},
+{
+  "directory": "/home/hv/CLionProjects/hello-worlds/packages/planet-c",
+  "command": "/usr/bin/cc  -I/home/hv/CLionProjects/hello-worlds/packages/planet-c/src -O3 -DNDEBUG -std=gnu99 -I/usr/include -o CMakeFiles/planet_example.dir/src/shadow.c.o -c /home/hv/CLionProjects/hello-worlds/packages/planet-c/src/shadow.c",
+  "file": "/home/hv/CLionProjects/hello-worlds/packages/planet-c/src/shadow.c",
+  "output": "CMakeFiles/planet_example.dir/src/shadow.c.o"
+},
+{
+  "directory": "/home/hv/CLionProjects/hello-worlds/packages/planet-c",
+  "command": "/usr/bin/cc  -I/home/hv/CLionProjects/hello-worlds/packages/planet-c/src -O3 -DNDEBUG -std=gnu99 -I/usr/include -o CMakeFiles/planet_example.dir/src/camera.c.o -c /home/hv/CLionProjects/hello-worlds/packages/planet-c/src/camera.c",
+  "file": "/home/hv/CLionProjects/hello-worlds/packages/planet-c/src/camera.c",
+  "output": "CMakeFiles/planet_example.dir/src/camera.c.o"
+},
+{
+  "directory": "/home/hv/CLionProjects/hello-worlds/packages/planet-c",
+  "command": "/usr/bin/cc  -I/home/hv/CLionProjects/hello-worlds/packages/planet-c/src -O3 -DNDEBUG -std=gnu99 -I/usr/include -o CMakeFiles/planet_example.dir/src/ui.c.o -c /home/hv/CLionProjects/hello-worlds/packages/planet-c/src/ui.c",
+  "file": "/home/hv/CLionProjects/hello-worlds/packages/planet-c/src/ui.c",
+  "output": "CMakeFiles/planet_example.dir/src/ui.c.o"
+},
+{
+  "directory": "/home/hv/CLionProjects/hello-worlds/packages/planet-c",
+  "command": "/usr/bin/cc  -I/home/hv/CLionProjects/hello-worlds/packages/planet-c/src -O3 -DNDEBUG -std=gnu99 -I/usr/include -o CMakeFiles/quadtree_example.dir/examples/quadtree/quadtree.c.o -c /home/hv/CLionProjects/hello-worlds/packages/planet-c/examples/quadtree/quadtree.c",
+  "file": "/home/hv/CLionProjects/hello-worlds/packages/planet-c/examples/quadtree/quadtree.c",
+  "output": "CMakeFiles/quadtree_example.dir/examples/quadtree/quadtree.c.o"
+},
+{
+  "directory": "/home/hv/CLionProjects/hello-worlds/packages/planet-c",
+  "command": "/usr/bin/cc  -I/home/hv/CLionProjects/hello-worlds/packages/planet-c/src -O3 -DNDEBUG -std=gnu99 -I/usr/include -o CMakeFiles/quadtree_example.dir/src/quadtree.c.o -c /home/hv/CLionProjects/hello-worlds/packages/planet-c/src/quadtree.c",
+  "file": "/home/hv/CLionProjects/hello-worlds/packages/planet-c/src/quadtree.c",
+  "output": "CMakeFiles/quadtree_example.dir/src/quadtree.c.o"
+},
+{
+  "directory": "/home/hv/CLionProjects/hello-worlds/packages/planet-c",
+  "command": "/usr/bin/cc  -I/home/hv/CLionProjects/hello-worlds/packages/planet-c/src -O3 -DNDEBUG -std=gnu99 -I/usr/include -o CMakeFiles/quadtree_mesh.dir/examples/quadtree/quadtree_mesh.c.o -c /home/hv/CLionProjects/hello-worlds/packages/planet-c/examples/quadtree/quadtree_mesh.c",
+  "file": "/home/hv/CLionProjects/hello-worlds/packages/planet-c/examples/quadtree/quadtree_mesh.c",
+  "output": "CMakeFiles/quadtree_mesh.dir/examples/quadtree/quadtree_mesh.c.o"
+},
+{
+  "directory": "/home/hv/CLionProjects/hello-worlds/packages/planet-c",
+  "command": "/usr/bin/cc  -I/home/hv/CLionProjects/hello-worlds/packages/planet-c/src -O3 -DNDEBUG -std=gnu99 -I/usr/include -o CMakeFiles/quadtree_mesh.dir/src/camera.c.o -c /home/hv/CLionProjects/hello-worlds/packages/planet-c/src/camera.c",
+  "file": "/home/hv/CLionProjects/hello-worlds/packages/planet-c/src/camera.c",
+  "output": "CMakeFiles/quadtree_mesh.dir/src/camera.c.o"
+},
+{
+  "directory": "/home/hv/CLionProjects/hello-worlds/packages/planet-c",
+  "command": "/usr/bin/cc  -I/home/hv/CLionProjects/hello-worlds/packages/planet-c/src -O3 -DNDEBUG -std=gnu99 -I/usr/include -o CMakeFiles/quadtree_mesh.dir/src/shadow.c.o -c /home/hv/CLionProjects/hello-worlds/packages/planet-c/src/shadow.c",
+  "file": "/home/hv/CLionProjects/hello-worlds/packages/planet-c/src/shadow.c",
+  "output": "CMakeFiles/quadtree_mesh.dir/src/shadow.c.o"
+},
+{
+  "directory": "/home/hv/CLionProjects/hello-worlds/packages/planet-c",
+  "command": "/usr/bin/cc  -I/home/hv/CLionProjects/hello-worlds/packages/planet-c/src -O3 -DNDEBUG -std=gnu99 -I/usr/include -o CMakeFiles/quadtree_mesh.dir/src/quadtree.c.o -c /home/hv/CLionProjects/hello-worlds/packages/planet-c/src/quadtree.c",
+  "file": "/home/hv/CLionProjects/hello-worlds/packages/planet-c/src/quadtree.c",
+  "output": "CMakeFiles/quadtree_mesh.dir/src/quadtree.c.o"
+},
+{
+  "directory": "/home/hv/CLionProjects/hello-worlds/packages/planet-c",
+  "command": "/usr/bin/cc  -I/home/hv/CLionProjects/hello-worlds/packages/planet-c/src -O3 -DNDEBUG -std=gnu99 -I/usr/include -o CMakeFiles/quadtree_mesh.dir/src/mesh.c.o -c /home/hv/CLionProjects/hello-worlds/packages/planet-c/src/mesh.c",
+  "file": "/home/hv/CLionProjects/hello-worlds/packages/planet-c/src/mesh.c",
+  "output": "CMakeFiles/quadtree_mesh.dir/src/mesh.c.o"
+},
+{
+  "directory": "/home/hv/CLionProjects/hello-worlds/packages/planet-c",
+  "command": "/usr/bin/cc  -I/home/hv/CLionProjects/hello-worlds/packages/planet-c/src -O3 -DNDEBUG -std=gnu99 -I/usr/include -o CMakeFiles/quadtree_mesh.dir/src/noise.c.o -c /home/hv/CLionProjects/hello-worlds/packages/planet-c/src/noise.c",
+  "file": "/home/hv/CLionProjects/hello-worlds/packages/planet-c/src/noise.c",
+  "output": "CMakeFiles/quadtree_mesh.dir/src/noise.c.o"
+}
+]

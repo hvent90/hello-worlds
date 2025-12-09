@@ -107,4 +107,25 @@ Each step is standalone and testable before moving to the next.
 - Files: `snake_case` or `lowercase`
 
 **Style:** Follow raylib conventions for consistency with the library.
+
+## Checking for Compilation Errors
+
+Since LSP may not always be available, use CMake to check for compilation errors:
+
+```bash
+# Configure build (only needed once or after CMakeLists.txt changes)
+cmake -B build -S .
+
+# Build specific target to check for errors
+cmake --build build --target <target_name>
+```
+
+**Available targets:**
+- `planet_example` - Main planet renderer
+- `quadtree_example` - 2D quadtree debugger
+- `quadtree_mesh` - 3D mesh-based quadtree LOD
+
+Example: `cmake --build build --target quadtree_mesh`
+
+This catches all compilation errors (missing includes, type errors, implicit declarations, etc.) without needing to read CMakeLists.txt.
 </project>

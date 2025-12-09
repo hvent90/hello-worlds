@@ -17,6 +17,11 @@ typedef void *(*QuadTreeUserDataCreateFunc)(QuadTreeNode *parent,
                                              QuadTreeNode *child,
                                              void *parent_user_data);
 
+// Callback to recreate user_data for a parent node after merging
+// Parameters: parent node (now a leaf)
+// Returns: user_data for the parent node
+typedef void *(*QuadTreeUserDataRecreateFunc)(QuadTreeNode *node);
+
 struct QuadTreeNode {
   // Bounds
   float x, y, width, height;
@@ -38,15 +43,19 @@ QuadTreeNode *create_quadtree_node(float x, float y, float width, float height,
 void delete_quadtree_node(QuadTreeNode *node,
                           QuadTreeUserDataCleanupFunc cleanup);
 void subdivide_quadtree_node(QuadTreeNode *node,
-                             QuadTreeUserDataCreateFunc create_child_data);
+                             QuadTreeUserDataCreateFunc create_child_data,
+                             QuadTreeUserDataCleanupFunc cleanup_parent_data);
 void merge_quadtree_node(QuadTreeNode *node,
-                         QuadTreeUserDataCleanupFunc cleanup);
+                         QuadTreeUserDataCleanupFunc cleanup,
+                         QuadTreeUserDataRecreateFunc recreate_parent_data);
 QuadTreeNode *find_quadtree_node_at_point(QuadTreeNode *node, int x, int y);
 
 // LOD operations (distance-based subdivision/merging)
 void process_leaf_nodes(QuadTreeNode *node, Vector2 point, int max_depth,
-                       QuadTreeUserDataCreateFunc create_child_data);
+                       QuadTreeUserDataCreateFunc create_child_data,
+                       QuadTreeUserDataCleanupFunc cleanup_parent_data);
 void merge_distant_leaves(QuadTreeNode *node, Vector2 point,
-                         QuadTreeUserDataCleanupFunc cleanup);
+                         QuadTreeUserDataCleanupFunc cleanup,
+                         QuadTreeUserDataRecreateFunc recreate_parent_data);
 
 #endif // QUADTREE_H

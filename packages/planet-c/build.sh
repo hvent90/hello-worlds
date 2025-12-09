@@ -102,7 +102,8 @@ cmake .. \
 
 # Build
 echo -e "${YELLOW}Building project...${NC}"
-cmake --build . --config "$BUILD_TYPE" -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+# cmake --build . --config "$BUILD_TYPE" -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+cmake --build . --config "$BUILD_TYPE"
 
 echo ""
 echo -e "${GREEN}=== Build Complete ===${NC}"
@@ -111,4 +112,5 @@ echo ""
 echo "To run:"
 echo "  ./$BUILD_DIR/planet_example"
 
-./build/planet_example
+# ./build/planet_example
+./build/quadtree_mesh

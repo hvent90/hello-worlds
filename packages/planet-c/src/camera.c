@@ -1,5 +1,6 @@
 #include "camera.h"
 #include "raymath.h"
+#include <raylib.h>
 
 float UpdateCameraMovement(Camera3D *camera, const float deltaTime) {
   // Floating pawn control variables (static to persist between frames)
@@ -9,6 +10,8 @@ float UpdateCameraMovement(Camera3D *camera, const float deltaTime) {
   static float movementSpeed = 50.0f;
   const float mouseSensitivity = 0.1f;
   const float rollSpeed = 60.0f; // Degrees per second
+  const float sprint_multiplier = 50.0f;
+  float is_sprinting = IsKeyDown(KEY_LEFT_SHIFT);
 
   // Mouse wheel for speed control (logarithmic scaling)
   float wheelMove = GetMouseWheelMove();
@@ -77,7 +80,9 @@ float UpdateCameraMovement(Camera3D *camera, const float deltaTime) {
   // Normalize movement vector if moving (to prevent faster diagonal movement)
   if (Vector3Length(movement) > 0.0f) {
     movement = Vector3Normalize(movement);
-    movement = Vector3Scale(movement, movementSpeed * deltaTime);
+    movement =
+        Vector3Scale(movement, movementSpeed * deltaTime *
+                                   (is_sprinting ? sprint_multiplier : 1));
     camera->position = Vector3Add(camera->position, movement);
   }
 

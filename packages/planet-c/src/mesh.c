@@ -98,6 +98,105 @@ Mesh create_plane_mesh_with_noise(float scale, int resolution) {
   return plane_mesh;
 }
 
+Mesh create_plane_mesh_with_noise_ws(Vector3 position, float scale,
+                                     int resolution) {
+  const int vertex_count = (resolution + 1) * (resolution + 1);
+  const int triangle_count = resolution * resolution * 2;
+  const int index_count = triangle_count * 3;
+
+  Vector3 *vertices = malloc(vertex_count * sizeof(Vector3));
+  unsigned short *indices = malloc(index_count * sizeof(unsigned short));
+  Vector3 *normals = malloc(vertex_count * sizeof(Vector3));
+
+  Mesh plane_mesh = {0}; // Initialize all fields in struct to 0
+  if (vertices && indices && normals) {
+    // Create vertex positions
+    for (int z = 0; z <= resolution; z++) {
+      for (int x = 0; x <= resolution; x++) {
+        const int idx = z * (resolution + 1) + x;
+        const float xPos = ((float)x / (float)resolution) * scale;
+        const float zPos = ((float)z / (float)resolution) * scale;
+
+        const float noise_x = position.x + xPos;
+        const float noise_z = position.z + zPos;
+        vertices[idx] = (Vector3){
+            xPos,
+            evaluate_moon_noise(noise_x * 0.00002f, noise_z * 0.00002f) *
+                3000.0f,
+            // noise_simplex(noise_x * 0.001f, noise_z * 0.001f) * 30,
+            zPos};
+      }
+    }
+
+    // Initialize normals to zero
+    for (unsigned int i = 0; i < vertex_count; i++) {
+      normals[i] = (Vector3){0.0f, 0.0f, 0.0f};
+    }
+
+    // Create indices and accumulate normals
+    int idx = 0;
+    for (int z = 0; z < resolution; z++) {
+      for (int x = 0; x < resolution; x++) {
+        const int v0 = z * (resolution + 1) + x;
+        const int v1 = v0 + 1;
+        const int v2 = (z + 1) * (resolution + 1) + x;
+        const int v3 = v2 + 1;
+
+        // First triangle (counter-clockwise from above)
+        indices[idx++] = v0;
+        indices[idx++] = v2;
+        indices[idx++] = v1;
+
+        Vector3 edge1 = Vector3Subtract(vertices[v2], vertices[v0]);
+        Vector3 edge2 = Vector3Subtract(vertices[v1], vertices[v0]);
+        Vector3 normal = Vector3CrossProduct(edge1, edge2);
+        normals[v0] = Vector3Add(normals[v0], normal);
+        normals[v2] = Vector3Add(normals[v2], normal);
+        normals[v1] = Vector3Add(normals[v1], normal);
+
+        // Second triangle
+        indices[idx++] = v1;
+        indices[idx++] = v2;
+        indices[idx++] = v3;
+
+        edge1 = Vector3Subtract(vertices[v2], vertices[v1]);
+        edge2 = Vector3Subtract(vertices[v3], vertices[v1]);
+        normal = Vector3CrossProduct(edge1, edge2);
+        normals[v1] = Vector3Add(normals[v1], normal);
+        normals[v2] = Vector3Add(normals[v2], normal);
+        normals[v3] = Vector3Add(normals[v3], normal);
+      }
+    }
+
+    // Normalize all vertex normals
+    for (unsigned int i = 0; i < vertex_count; i++) {
+      normals[i] = Vector3Normalize(normals[i]);
+    }
+
+    // Populate the mesh
+    plane_mesh.vertexCount = vertex_count;
+    plane_mesh.triangleCount = triangle_count;
+    plane_mesh.vertices = (float *)vertices;
+    plane_mesh.indices = indices;
+    plane_mesh.normals = (float *)normals;
+
+    UploadMesh(&plane_mesh, false);
+    if (plane_mesh.vaoId == 0) {
+      fprintf(stderr, "Mesh upload may have failed\n");
+      // Clean up on upload failure
+      free(vertices);
+      free(indices);
+      free(normals);
+      plane_mesh = (Mesh){0};
+    }
+    // NOTE: Don't free vertices/indices/normals here - UnloadMesh() will handle
+    // it
+  } else {
+    fprintf(stderr, "Quad memory allocation failed\n");
+  }
+
+  return plane_mesh;
+}
 Mesh create_plane_mesh(float scale, int resolution) {
   const int vertex_count = (resolution + 1) * (resolution + 1);
   const int triangle_count = resolution * resolution * 2;

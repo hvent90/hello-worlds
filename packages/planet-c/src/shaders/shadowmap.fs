@@ -39,7 +39,7 @@ void main()
     float viewDepth = length(viewPos - fragPosition);
 
     // Select cascade based on view depth
-    int cascadeIndex = 0;
+    int cascadeIndex = 4;
     for (int i = 0; i < 4; i++) {
         if (viewDepth < cascadeSplits[i + 1]) {
             cascadeIndex = i;
@@ -109,11 +109,18 @@ void main()
     float shadow = 1.0 - (float(shadowCounter) / float(numSamples));
 
     // Combine lighting components
+    vec3 cascadeDebugComponent = vec3(0, 0, 0);
+    if (cascadeIndex == 0) cascadeDebugComponent = vec3(1, 0, 0);
+    else if (cascadeIndex == 1) cascadeDebugComponent = vec3(0, 1, 0);
+    else if (cascadeIndex == 2) cascadeDebugComponent = vec3(0, 0, 1);
+    else if (cascadeIndex == 3) cascadeDebugComponent = vec3(1, 1, 0);
+
     vec3 ambientComponent = ambient.rgb * texelColor.rgb;
     vec3 diffuseComponent = lightColor.rgb * NdotL * texelColor.rgb * shadow;
-    vec3 specularComponent = lightColor.rgb * specular * shadow * 0.3; // Reduced specular intensity
+    vec3 specularComponent = lightColor.rgb * specular * shadow * 0.05; // Reduced specular intensity
     
-    vec3 color = ambientComponent + diffuseComponent + specularComponent;
+    vec3 color = ambientComponent + diffuseComponent + specularComponent; // + cascadeDebugComponent;
+  
     finalColor = vec4(color, 1.0) * colDiffuse;
 
     // Gamma correction

@@ -56,8 +56,11 @@ add_executable(quadtree_example
 
 add_executable(quadtree_mesh
   examples/quadtree/quadtree_mesh.c
+  src/camera.c
+  src/shadow.c
   src/quadtree.c
-  src/mesh.c)
+  src/mesh.c
+  src/noise.c)
 
 # Include directories
 target_include_directories(planet_example PRIVATE src)

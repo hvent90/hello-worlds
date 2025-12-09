@@ -244,7 +244,8 @@ float evaluate_moon_noise(float x, float z) {
 
   // Combine
   // Maria areas should be smoother and lower
-  float final_height = base_terrain;
+  float final_height = 0;
+  final_height += base_terrain;
 
   // Apply craters
   final_height += craters_large;

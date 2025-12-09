@@ -60,11 +60,11 @@ int main(void) {
       if (IsMouseButtonPressed(0) && hovered &&
           !CheckCollisionPointRec(mouse_pos, manual_button) &&
           !CheckCollisionPointRec(mouse_pos, automatic_button)) {
-        subdivide_quadtree_node(hovered, NULL);
+        subdivide_quadtree_node(hovered, NULL, NULL);
       }
 
       if (IsMouseButtonPressed(1) && hovered) {
-        merge_quadtree_node(hovered, NULL);
+        merge_quadtree_node(hovered, NULL, NULL);
       }
 
       // Draw quadtree
@@ -79,8 +79,8 @@ int main(void) {
       break;
     }
     case MODE_AUTOMATIC: {
-      process_leaf_nodes(root_node, mouse_pos, 8, NULL);
-      merge_distant_leaves(root_node, mouse_pos, NULL);
+      process_leaf_nodes(root_node, mouse_pos, 8, NULL, NULL);
+      merge_distant_leaves(root_node, mouse_pos, NULL, NULL);
       draw_quadtree_node(root_node);
 
       break;
