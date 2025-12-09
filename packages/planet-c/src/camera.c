@@ -3,15 +3,20 @@
 #include <raylib.h>
 
 float UpdateCameraMovement(Camera3D *camera, const float deltaTime) {
-  // Floating pawn control variables (static to persist between frames)
-  static float pitch = 0.0f;
-  static float yaw = -90.0f; // Start looking toward -Z
-  static float roll = 0.0f;
+  // Quaternion-based camera orientation (static to persist between frames)
+  static Quaternion orientation = {0.0f, 0.0f, 0.0f, 1.0f}; // Identity quaternion
+  static bool initialized = false;
   static float movementSpeed = 50.0f;
   const float mouseSensitivity = 0.1f;
   const float rollSpeed = 60.0f; // Degrees per second
   const float sprint_multiplier = 50.0f;
   float is_sprinting = IsKeyDown(KEY_LEFT_SHIFT);
+
+  // Initialize orientation to look toward -Z on first call
+  if (!initialized) {
+    orientation = QuaternionFromAxisAngle((Vector3){0.0f, 1.0f, 0.0f}, -90.0f * DEG2RAD);
+    initialized = true;
+  }
 
   // Mouse wheel for speed control (logarithmic scaling)
   float wheelMove = GetMouseWheelMove();
@@ -25,43 +30,51 @@ float UpdateCameraMovement(Camera3D *camera, const float deltaTime) {
       movementSpeed = maxSpeed;
   }
 
-  // Mouse look (pitch and yaw)
+  // Extract current camera axes from orientation
+  Vector3 forward = Vector3RotateByQuaternion((Vector3){0.0f, 0.0f, -1.0f}, orientation);
+  Vector3 right = Vector3RotateByQuaternion((Vector3){1.0f, 0.0f, 0.0f}, orientation);
+  Vector3 up = Vector3RotateByQuaternion((Vector3){0.0f, 1.0f, 0.0f}, orientation);
+
+  // Mouse look - rotate around camera's local axes
   Vector2 mouseDelta = GetMouseDelta();
-  yaw += mouseDelta.x * mouseSensitivity;
-  pitch -= mouseDelta.y * mouseSensitivity;
+  if (mouseDelta.x != 0.0f || mouseDelta.y != 0.0f) {
+    // Yaw: rotate around camera's local up axis
+    float yawAngle = -mouseDelta.x * mouseSensitivity * DEG2RAD;
+    Quaternion yawRotation = QuaternionFromAxisAngle(up, yawAngle);
 
-  // Clamp pitch to prevent gimbal lock
-  if (pitch > 89.0f)
-    pitch = 89.0f;
-  if (pitch < -89.0f)
-    pitch = -89.0f;
+    // Pitch: rotate around camera's local right axis
+    float pitchAngle = -mouseDelta.y * mouseSensitivity * DEG2RAD;
+    Quaternion pitchRotation = QuaternionFromAxisAngle(right, pitchAngle);
 
-  // Roll controls (Q/E)
-  if (IsKeyDown(KEY_Q))
-    roll -= rollSpeed * deltaTime;
-  if (IsKeyDown(KEY_E))
-    roll += rollSpeed * deltaTime;
+    // Apply rotations: first yaw, then pitch
+    orientation = QuaternionMultiply(yawRotation, orientation);
+    orientation = QuaternionMultiply(pitchRotation, orientation);
+    orientation = QuaternionNormalize(orientation);
 
-  // Calculate camera forward vector from pitch and yaw
-  Vector3 forward = {cosf(pitch * DEG2RAD) * cosf(yaw * DEG2RAD),
-                     sinf(pitch * DEG2RAD),
-                     cosf(pitch * DEG2RAD) * sinf(yaw * DEG2RAD)};
-  forward = Vector3Normalize(forward);
-
-  // Calculate right vector (perpendicular to forward and world up)
-  Vector3 worldUp = {0.0f, 1.0f, 0.0f};
-  Vector3 right = Vector3Normalize(Vector3CrossProduct(forward, worldUp));
-
-  // Calculate camera up vector (perpendicular to forward and right)
-  Vector3 up = Vector3Normalize(Vector3CrossProduct(right, forward));
-
-  // Apply roll rotation to up vector
-  if (roll != 0.0f) {
-    up = Vector3RotateByAxisAngle(up, forward, roll * DEG2RAD);
-    right = Vector3Normalize(Vector3CrossProduct(forward, up));
+    // Recalculate axes after rotation
+    forward = Vector3RotateByQuaternion((Vector3){0.0f, 0.0f, -1.0f}, orientation);
+    right = Vector3RotateByQuaternion((Vector3){1.0f, 0.0f, 0.0f}, orientation);
+    up = Vector3RotateByQuaternion((Vector3){0.0f, 1.0f, 0.0f}, orientation);
   }
 
-  // Movement input (camera-relative)
+  // Roll controls (Q/E) - rotate around camera's local forward axis
+  if (IsKeyDown(KEY_Q) || IsKeyDown(KEY_E)) {
+    float rollAngle = 0.0f;
+    if (IsKeyDown(KEY_Q))
+      rollAngle -= rollSpeed * deltaTime * DEG2RAD;
+    if (IsKeyDown(KEY_E))
+      rollAngle += rollSpeed * deltaTime * DEG2RAD;
+
+    Quaternion rollRotation = QuaternionFromAxisAngle(forward, rollAngle);
+    orientation = QuaternionMultiply(rollRotation, orientation);
+    orientation = QuaternionNormalize(orientation);
+
+    // Recalculate up and right after roll
+    right = Vector3RotateByQuaternion((Vector3){1.0f, 0.0f, 0.0f}, orientation);
+    up = Vector3RotateByQuaternion((Vector3){0.0f, 1.0f, 0.0f}, orientation);
+  }
+
+  // Movement input (camera-relative using local axes)
   Vector3 movement = {0.0f, 0.0f, 0.0f};
 
   if (IsKeyDown(KEY_W))
@@ -73,9 +86,9 @@ float UpdateCameraMovement(Camera3D *camera, const float deltaTime) {
   if (IsKeyDown(KEY_A))
     movement = Vector3Subtract(movement, right);
   if (IsKeyDown(KEY_SPACE))
-    movement = Vector3Add(movement, worldUp); // World-relative up
+    movement = Vector3Add(movement, up); // Camera-relative up
   if (IsKeyDown(KEY_LEFT_CONTROL))
-    movement = Vector3Subtract(movement, worldUp); // World-relative down
+    movement = Vector3Subtract(movement, up); // Camera-relative down
 
   // Normalize movement vector if moving (to prevent faster diagonal movement)
   if (Vector3Length(movement) > 0.0f) {
@@ -87,7 +100,7 @@ float UpdateCameraMovement(Camera3D *camera, const float deltaTime) {
   }
 
   // Update camera target and up
-  camera->target = Vector3Add(camera->position, forward);
+  camera->target = Vector3Add(camera->position, Vector3Scale(forward, 1000.0f));
   camera->up = up;
 
   return movementSpeed; // Return speed for UI display

@@ -62,18 +62,30 @@ add_executable(quadtree_mesh
   src/mesh.c
   src/noise.c)
 
+add_executable(quadtree_cubic
+  examples/quadtree/quadtree_cubic.c
+  src/camera.c
+  src/shadow.c
+  src/quadtree.c
+  src/mesh.c
+  src/noise.c
+  src/cube_face.c)
+
 # Include directories
 target_include_directories(planet_example PRIVATE src)
 target_include_directories(quadtree_example PRIVATE src)
 target_include_directories(quadtree_mesh PRIVATE src)
+target_include_directories(quadtree_cubic PRIVATE src)
 
 # Link libraries for quadtree_example
 if (UNIX)
     target_link_libraries(quadtree_example PRIVATE m raylib)
     target_link_libraries(quadtree_mesh PRIVATE m raylib)
+    target_link_libraries(quadtree_cubic PRIVATE m raylib)
 else()
     target_link_libraries(quadtree_example PRIVATE raylib)
     target_link_libraries(quadtree_mesh PRIVATE raylib)
+    target_link_libraries(quadtree_cubic PRIVATE raylib)
 endif()
 
 # Link math library on Unix-like systems (not needed on Windows)
@@ -90,6 +102,11 @@ add_custom_command(TARGET planet_example POST_BUILD
         ${CMAKE_BINARY_DIR}/shaders)
 
 add_custom_command(TARGET quadtree_mesh POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_SOURCE_DIR}/src/shaders
+        ${CMAKE_BINARY_DIR}/shaders)
+
+add_custom_command(TARGET quadtree_cubic POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
         ${CMAKE_SOURCE_DIR}/src/shaders
         ${CMAKE_BINARY_DIR}/shaders)
