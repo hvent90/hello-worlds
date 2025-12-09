@@ -3,7 +3,7 @@
 
 #include "raylib.h"
 
-#define SHADOWMAP_RESOLUTION 1024
+#define SHADOWMAP_RESOLUTION 4096
 #define CASCADE_COUNT 4
 
 typedef struct {
