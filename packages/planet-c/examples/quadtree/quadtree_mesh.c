@@ -454,6 +454,7 @@ int main(void) {
   int showTestBall = 1;  // Toggle with 'B' key
 
   while (!WindowShouldClose()) {
+    double t0 = GetTime();
     // ===== Wireframe =====
     if (IsKeyPressed(KEY_F)) {
       enable_wireframe = !enable_wireframe;
@@ -606,6 +607,8 @@ int main(void) {
     }
     SetShaderValue(shadowShader, lightDirLoc, &lightDir, SHADER_UNIFORM_VEC3);
 
+    double update_time = GetTime() - t0;
+
     // ===== PASS 1: Render shadow map from light's perspective =====
     const double shadow_map_start = GetTime();
     for (unsigned short i = 0; i < CASCADE_COUNT; i++) {
@@ -681,6 +684,7 @@ int main(void) {
       rlSetUniform(shadowMapLocs[i], &textureSlot, SHADER_UNIFORM_INT, 1);
     }
 
+    double t_draw = GetTime();
     BeginMode3D(camera);
 
     draw_quadtree_meshes(root_node, shadowMaterial);
@@ -694,6 +698,7 @@ int main(void) {
     }
 
     EndMode3D();
+    double draw_time = GetTime() - t_draw;
 
     // ===== Draw UI Text =====
     DrawText(current_mode == MODE_MANUAL ? "Mode: Manual (M)"
@@ -709,6 +714,11 @@ int main(void) {
     DrawText(TextFormat("Camera Pos: (%.1f, %.1f, %.1f)", camera.position.x,
                         camera.position.y, camera.position.z),
              10, 130, 20, YELLOW);
+
+    DrawText(TextFormat("Update Time: %.2f ms", update_time * 1000.0), 10, 160, 20, GREEN);
+    DrawText(TextFormat("Shadow Pass: %.2f ms", shadow_map_time * 1000.0), 10, 190, 20, GREEN);
+    DrawText(TextFormat("Draw 3D Time: %.2f ms", draw_time * 1000.0), 10, 220, 20, GREEN);
+    DrawText(TextFormat("Frame Time: %.2f ms (%.0f FPS)", deltaTime * 1000.0, 1.0f / deltaTime), 10, 250, 20, GREEN);
 
     EndDrawing();
   }

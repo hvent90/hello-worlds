@@ -17,8 +17,12 @@
 // Planet configuration
 const float PLANET_RADIUS = 1700000.0f;  // 1000 km
 const float NOISE_SCALE = 3000.0f;       // Height variation in meters
-const float SKIRT_DEPTH = 500.0f;        // Skirt depth to hide seams
+const float SKIRT_DEPTH = 4000.0f;        // Skirt depth to hide seams (must be > NOISE_SCALE)
 #define MAX_DEPTH 8
+
+// Tweakable parameters
+int chunk_resolution = 32;
+int min_depth = 0;
 
 // Mesh data attached to each quadtree node
 typedef struct {
@@ -125,7 +129,7 @@ FrustumBounds compute_light_frustum_bounds(Vector3 corners[8], Vector3 lightDir,
 void cleanup_mesh_data(void *user_data);
 void *create_child_mesh_data(QuadTreeNode *parent, QuadTreeNode *child, void *parent_user_data);
 void *recreate_parent_mesh_data(QuadTreeNode *node);
-void draw_cubic_quadtree(CubicQuadTree *tree, Vector3 camera_pos, Material material);
+int draw_cubic_quadtree(CubicQuadTree *tree, Vector3 camera_pos, Material material);
 
 // ===== Mesh Data Lifecycle =====
 
@@ -180,7 +184,7 @@ void *create_child_mesh_data(QuadTreeNode *parent, QuadTreeNode *child, void *pa
   Mesh mesh = create_sphere_patch_mesh(parent_data->face, 
                                         u_min, u_max, v_min, v_max,
                                         PLANET_RADIUS, NOISE_SCALE,
-                                        32, SKIRT_DEPTH);
+                                        chunk_resolution, SKIRT_DEPTH);
   
   CubicQuadTreeMeshData *child_data = malloc(sizeof(CubicQuadTreeMeshData));
   if (child_data == NULL) {
@@ -208,8 +212,8 @@ void *recreate_parent_mesh_data(QuadTreeNode *node) {
 
 // ===== Drawing =====
 
-void draw_quadtree_meshes_recursive(QuadTreeNode *node, Material material) {
-  if (node == NULL) return;
+int draw_quadtree_meshes_recursive(QuadTreeNode *node, Material material) {
+  if (node == NULL) return 0;
   
   // Check if leaf
   bool is_leaf = true;
@@ -220,15 +224,18 @@ void draw_quadtree_meshes_recursive(QuadTreeNode *node, Material material) {
     }
   }
   
+  int count = 0;
   if (is_leaf && node->user_data != NULL) {
     CubicQuadTreeMeshData *mesh_data = (CubicQuadTreeMeshData *)node->user_data;
     Matrix transform = MatrixIdentity();  // Meshes are already in world space
     DrawMesh(mesh_data->mesh, material, transform);
+    count = mesh_data->mesh.vertexCount;
   } else {
     for (unsigned short i = 0; i < 4; i++) {
-      draw_quadtree_meshes_recursive(node->children[i], material);
+      count += draw_quadtree_meshes_recursive(node->children[i], material);
     }
   }
+  return count;
 }
 
 // Get face normal direction
@@ -269,12 +276,14 @@ bool is_face_visible(CubeFace face, Vector3 camera_pos, float planet_radius) {
   return dot > -(sin_horizon + 0.71f);
 }
 
-void draw_cubic_quadtree(CubicQuadTree *tree, Vector3 camera_pos, Material material) {
+int draw_cubic_quadtree(CubicQuadTree *tree, Vector3 camera_pos, Material material) {
+  int total_vertices = 0;
   for (int i = 0; i < CUBE_FACE_COUNT; i++) {
     if (tree->faces[i] != NULL && is_face_visible((CubeFace)i, camera_pos, tree->radius)) {
-      draw_quadtree_meshes_recursive(tree->faces[i], material);
+      total_vertices += draw_quadtree_meshes_recursive(tree->faces[i], material);
     }
   }
+  return total_vertices;
 }
 
 // ===== Custom LOD for 3D distance =====
@@ -282,7 +291,7 @@ void draw_cubic_quadtree(CubicQuadTree *tree, Vector3 camera_pos, Material mater
 // LOD thresholds in screen pixels
 // With 1000km planet and 32x32 mesh resolution, use high thresholds
 const float SUBDIVIDE_PIXEL_THRESHOLD = 4000.0f;  // Subdivide when chunk covers more than this many pixels
-const float MERGE_PIXEL_THRESHOLD = 3000.0f;      // Merge when chunk covers less than this many pixels
+const float MERGE_PIXEL_THRESHOLD = 1900.0f;      // Merge when chunk covers less than this many pixels (must be < SUBDIVIDE / 2)
 
 // Check distance from camera to chunk center (on sphere surface)
 float get_chunk_distance(CubicQuadTreeMeshData *data, Vector3 camera_pos) {
@@ -352,8 +361,8 @@ void process_face_lod(QuadTreeNode *node, Vector3 camera_pos, float camera_fov, 
   // Screen-space error: how many pixels does this chunk cover?
   float screen_pixels = get_screen_space_size(chunk_size, distance, camera_fov, screen_height);
   
-  // Subdivide if chunk covers more than threshold pixels on screen
-  if (screen_pixels > SUBDIVIDE_PIXEL_THRESHOLD && node->depth < max_depth) {
+  // Subdivide if chunk covers more than threshold pixels on screen OR if below min_depth
+  if ((screen_pixels > SUBDIVIDE_PIXEL_THRESHOLD || node->depth < min_depth) && node->depth < max_depth) {
     subdivide_quadtree_node(node, create_child_mesh_data, cleanup_mesh_data);
   }
 }
@@ -391,6 +400,18 @@ void merge_face_lod(QuadTreeNode *node, Vector3 camera_pos, float camera_fov, in
     if (screen_pixels > MERGE_PIXEL_THRESHOLD) {
       return;
     }
+  }
+
+  // If node depth is less than min_depth, we cannot merge (we need to be at least min_depth deep)
+  // Wait... merge happens at parent node. If parent node depth < min_depth, that means parent IS min_depth - 1. 
+  // We want to KEEP children if parent_depth < min_depth.
+  // Actually, node->depth is the depth of the PARENT node.
+  // If node->depth < min_depth, we should NOT have children at all... wait.
+  // If min_depth is 2. Root is depth 0. We want depth 0 to split to 1, 1 to split to 2. 
+  // We want to merge depth 2 nodes back to depth 1 ONLY if depth 1 >= min_depth.
+  // So if min_depth is 2, we can merge depth 3 to depth 2. But we CANNOT merge depth 2 to depth 1.
+  if (node->depth < min_depth) {
+    return;
   }
   
   // All children are small on screen - merge them back to parent
@@ -431,7 +452,7 @@ void merge_face_lod(QuadTreeNode *node, Vector3 camera_pos, float camera_fov, in
     parent_data->v_min = v_min;
     parent_data->v_max = v_max;
     parent_data->mesh = create_sphere_patch_mesh(face, u_min, u_max, v_min, v_max,
-                                                  PLANET_RADIUS, NOISE_SCALE, 32, SKIRT_DEPTH);
+                                                  PLANET_RADIUS, NOISE_SCALE, chunk_resolution, SKIRT_DEPTH);
     parent_data->center_elevation = get_center_elevation(face, u_min, u_max, v_min, v_max,
                                                           PLANET_RADIUS, NOISE_SCALE);
     node->user_data = parent_data;
@@ -492,7 +513,7 @@ CubicQuadTree *create_cubic_quadtree(float radius, float noise_scale) {
     root_data->v_min = -1.0f;
     root_data->v_max = 1.0f;
     root_data->mesh = create_sphere_patch_mesh((CubeFace)face, -1.0f, 1.0f, -1.0f, 1.0f,
-                                                radius, noise_scale, 32, SKIRT_DEPTH);
+                                                radius, noise_scale, chunk_resolution, SKIRT_DEPTH);
     root_data->center_elevation = get_center_elevation((CubeFace)face, -1.0f, 1.0f, -1.0f, 1.0f,
                                                         radius, noise_scale);
     
@@ -653,6 +674,11 @@ int main(void) {
   while (!WindowShouldClose()) {
     float deltaTime = GetFrameTime();
     
+    // Profiling variables
+    double t_lod_start = 0, t_lod_end = 0;
+    double t_shadows_start = 0, t_shadows_end = 0;
+    double t_render_start = 0, t_render_end = 0;
+    
     // Input: Wireframe toggle
     if (IsKeyPressed(KEY_F)) {
       enable_wireframe = !enable_wireframe;
@@ -700,11 +726,21 @@ int main(void) {
     Vector3 cameraPos = camera.position;
     SetShaderValue(shadowShader, shadowShader.locs[SHADER_LOC_VECTOR_VIEW],
                    &cameraPos, SHADER_UNIFORM_VEC3);
+
+    // Input: Resolution control with brackets [ ]
+    if (IsKeyPressed(KEY_RIGHT_BRACKET)) chunk_resolution = (chunk_resolution < 128) ? chunk_resolution + 4 : 128;
+    if (IsKeyPressed(KEY_LEFT_BRACKET)) chunk_resolution = (chunk_resolution > 4) ? chunk_resolution - 4 : 4;
+
+    // Input: Min Depth control with - and =
+    if (IsKeyPressed(KEY_EQUAL)) min_depth = (min_depth < MAX_DEPTH) ? min_depth + 1 : MAX_DEPTH;
+    if (IsKeyPressed(KEY_MINUS)) min_depth = (min_depth > 0) ? min_depth - 1 : 0;
     
     // LOD processing
+    t_lod_start = GetTime();
     if (enable_lod) {
       process_cubic_quadtree_lod(planet, camera.position, camera.fovy, GetScreenHeight(), MAX_DEPTH);
     }
+    t_lod_end = GetTime();
     
     // Compute stable up vector for light cameras
     Vector3 lightUp = compute_stable_up(lightDir);
@@ -762,6 +798,7 @@ int main(void) {
     }
     
     // ===== PASS 1: Render shadow maps =====
+    t_shadows_start = GetTime();
     for (unsigned short i = 0; i < CASCADE_COUNT; i++) {
       BeginTextureMode(shadowMaps[i]);
       ClearBackground(WHITE);
@@ -796,6 +833,7 @@ int main(void) {
       
       lightViewProjs[i] = MatrixMultiply(lightViews[i], lightProjs[i]);
     }
+    t_shadows_end = GetTime();
     
     // ===== PASS 2: Render main scene with shadows =====
     rlSetClipPlanes(100.0f, 10000000.0f);  // 100m to 10,000km
@@ -818,14 +856,17 @@ int main(void) {
     
     BeginMode3D(camera);
     
+    t_render_start = GetTime();
+    int vertexCount = 0;
     if (enable_lighting) {
-      draw_cubic_quadtree(planet, camera.position, shadowMaterial);
+      vertexCount = draw_cubic_quadtree(planet, camera.position, shadowMaterial);
     } else {
       Material unlitMat = LoadMaterialDefault();
-      draw_cubic_quadtree(planet, camera.position, unlitMat);
+      vertexCount = draw_cubic_quadtree(planet, camera.position, unlitMat);
     }
     
     EndMode3D();
+    t_render_end = GetTime();
     
     // UI
     DrawText("Cubic Quadtree Planet - Shadows", 10, 10, 20, WHITE);
@@ -841,6 +882,21 @@ int main(void) {
     DrawText(TextFormat("Altitude: %.1f km", altitude / 1000.0f), 10, 130, 20, YELLOW);
     DrawText(TextFormat("Camera: (%.0f, %.0f, %.0f)", 
              camera.position.x, camera.position.y, camera.position.z), 10, 160, 20, GRAY);
+
+    DrawText(TextFormat("[ / ]: Chunk Res (%d) | - / =: Min Depth (%d)", chunk_resolution, min_depth), 10, 185, 20, YELLOW);
+    
+    // Draw profiling info
+    double lod_ms = (t_lod_end - t_lod_start) * 1000.0;
+    double shadow_ms = (t_shadows_end - t_shadows_start) * 1000.0;
+    double render_ms = (t_render_end - t_render_start) * 1000.0;
+    
+    DrawText(TextFormat("LOD Update: %.2f ms", lod_ms), 10, 200, 20, GREEN);
+    DrawText(TextFormat("Shadow Maps: %.2f ms", shadow_ms), 10, 230, 20, GREEN);
+    DrawText(TextFormat("Main Render: %.2f ms", render_ms), 10, 260, 20, GREEN);
+    DrawText(TextFormat("Total CPU Work: %.2f ms", lod_ms + shadow_ms + render_ms), 10, 290, 20, GREEN);
+    DrawText(TextFormat("Active Vertices: %d", vertexCount), 10, 320, 20, GREEN);
+    
+
     
     DrawFPS(screenWidth - 100, 10);
     

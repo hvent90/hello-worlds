@@ -10,5 +10,6 @@ float evaluate_moon_noise(float x, float z);
 float noise_simplex_3d(float x, float y, float z);
 float noise_fbm_3d(float x, float y, float z, int octaves, float lacunarity, float gain);
 float evaluate_moon_noise_3d(float nx, float ny, float nz);
+float noise_crater_3d(float x, float y, float z);
 
 #endif

@@ -571,15 +571,15 @@ Mesh create_sphere_patch_mesh(CubeFace face,
       
       if (flip_winding) {
         indices[idx++] = m0;
-        indices[idx++] = m1;
         indices[idx++] = s0;
+        indices[idx++] = m1;
         indices[idx++] = m1;
         indices[idx++] = s1;
         indices[idx++] = s0;
       } else {
         indices[idx++] = m0;
-        indices[idx++] = s0;
         indices[idx++] = m1;
+        indices[idx++] = s0;
         indices[idx++] = m1;
         indices[idx++] = s0;
         indices[idx++] = s1;
@@ -606,15 +606,15 @@ Mesh create_sphere_patch_mesh(CubeFace face,
       
       if (flip_winding) {
         indices[idx++] = m0;
-        indices[idx++] = s0;
         indices[idx++] = m1;
+        indices[idx++] = s0;
         indices[idx++] = m1;
         indices[idx++] = s0;
         indices[idx++] = s1;
       } else {
         indices[idx++] = m0;
-        indices[idx++] = m1;
         indices[idx++] = s0;
+        indices[idx++] = m1;
         indices[idx++] = m1;
         indices[idx++] = s1;
         indices[idx++] = s0;
@@ -676,15 +676,15 @@ Mesh create_sphere_patch_mesh(CubeFace face,
       
       if (flip_winding) {
         indices[idx++] = m0;
-        indices[idx++] = m1;
         indices[idx++] = s0;
+        indices[idx++] = m1;
         indices[idx++] = m1;
         indices[idx++] = s1;
         indices[idx++] = s0;
       } else {
         indices[idx++] = m0;
-        indices[idx++] = s0;
         indices[idx++] = m1;
+        indices[idx++] = s0;
         indices[idx++] = m1;
         indices[idx++] = s0;
         indices[idx++] = s1;

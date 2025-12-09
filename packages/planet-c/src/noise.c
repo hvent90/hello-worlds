@@ -384,6 +384,71 @@ float noise_fbm_3d(float x, float y, float z, int octaves, float lacunarity, flo
 }
 
 // --------------------------------------------------------------------------------
+// 3D Crater Noise
+// --------------------------------------------------------------------------------
+
+static float hash3(float x, float y, float z) {
+  // Simple 3D hash
+  float h = sinf(x * 12.9898f + y * 78.233f + z * 54.53f) * 43758.5453f;
+  return h - floorf(h);
+}
+
+static void get_random_point_3d(int cx, int cy, int cz, float *px, float *py, float *pz) {
+  float h1 = hash3((float)cx, (float)cy, (float)cz);
+  float h2 = hash3((float)cx + 123.0f, (float)cy + 456.0f, (float)cz + 789.0f);
+  float h3 = hash3((float)cx + 987.0f, (float)cy + 654.0f, (float)cz + 321.0f);
+
+  *px = (float)cx + 0.5f + 0.4f * (h1 * 2.0f - 1.0f);
+  *py = (float)cy + 0.5f + 0.4f * (h2 * 2.0f - 1.0f);
+  *pz = (float)cz + 0.5f + 0.4f * (h3 * 2.0f - 1.0f);
+}
+
+float noise_crater_3d(float x, float y, float z) {
+  int xi = (int)floorf(x);
+  int yi = (int)floorf(y);
+  int zi = (int)floorf(z);
+
+  float min_dist = 1.0f;
+  float crater_radius = 0.0f;
+
+  for (int k = -1; k <= 1; k++) {
+    for (int j = -1; j <= 1; j++) {
+      for (int i = -1; i <= 1; i++) {
+        float px, py, pz;
+        get_random_point_3d(xi + i, yi + j, zi + k, &px, &py, &pz);
+
+        float dx = px - x;
+        float dy = py - y;
+        float dz = pz - z;
+        float dist = sqrtf(dx * dx + dy * dy + dz * dz);
+
+        float h = hash3((float)(xi + i), (float)(yi + j), (float)(zi + k));
+        float radius = 0.3f + 0.2f * h;
+
+        if (dist < min_dist) {
+          min_dist = dist;
+          crater_radius = radius;
+        }
+      }
+    }
+  }
+
+  // Profile
+  float d = min_dist / crater_radius;
+  if (d > 1.0f)
+    return 0.0f;
+
+  float rim_width = 0.2f;
+  if (d > 1.0f - rim_width) {
+    float rd = (d - (1.0f - rim_width)) / rim_width;
+    return 0.2f * sinf(rd * 3.14159f);
+  } else {
+    float bd = d / (1.0f - rim_width);
+    return -0.8f * (1.0f - bd * bd);
+  }
+}
+
+// --------------------------------------------------------------------------------
 // 3D Moon Surface Evaluator (for spherical planets)
 // Input: normalized sphere direction (nx, ny, nz) - unit vector from planet center
 // Output: height displacement (same scale as 2D version)
@@ -402,17 +467,17 @@ float evaluate_moon_noise_3d(float nx, float ny, float nz) {
   float base_terrain = noise_fbm_3d(x * 0.5f, y * 0.5f, z * 0.5f, 6, 2.0f, 0.5f);
 
   // 2. Large Craters - using 3D noise with offset for variety
-  float craters_large = noise_fbm_3d(x * 0.2f + 100.0f, y * 0.2f, z * 0.2f, 2, 2.0f, 0.5f) * 2.0f;
+  float craters_large = noise_crater_3d(x * 0.2f, y * 0.2f, z * 0.2f) * 2.5f;
 
   // 3. Small detail
-  float detail = noise_fbm_3d(x * 2.0f, y * 2.0f, z * 2.0f, 3, 2.0f, 0.5f) * 0.3f;
+  float craters_small = noise_crater_3d(x * 1.5f, y * 1.5f, z * 1.5f) * 0.5f;
 
   // 4. Maria (Dark Plains) - Low frequency noise to mask out rough terrain
   float maria_noise = noise_simplex_3d(x * 0.1f, y * 0.1f, z * 0.1f);
   float maria_mask = fmaxf(0.0f, fminf(1.0f, (maria_noise - 0.1f) * 5.0f));
 
   // Combine
-  float final_height = base_terrain + craters_large + detail;
+  float final_height = base_terrain + craters_large + craters_small;
 
   // Apply Maria flattening
   float maria_height = -0.5f + noise_fbm_3d(x * 2.0f, y * 2.0f, z * 2.0f, 2, 2.0f, 0.5f) * 0.1f;
