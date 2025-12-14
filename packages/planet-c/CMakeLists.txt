@@ -70,7 +70,7 @@ add_executable(quadtree_cubic
   src/mesh.c
   src/noise.c
   src/cube_face.c
-  src/async_loader.c)
+  src/mesh_thread_pool.c)
 
 # Include directories
 target_include_directories(planet_example PRIVATE src)

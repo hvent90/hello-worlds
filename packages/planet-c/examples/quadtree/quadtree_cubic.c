@@ -7,13 +7,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 // clang-format off
-// clang-format off
 #include "shadow.h"
 #include "camera.h"
 #include "quadtree.h"
 #include "mesh.h"
 #include "cube_face.h"
-#include "async_loader.h"
+#include "mesh_thread_pool.h"
 // clang-format on
 
 // Planet configuration
@@ -30,6 +29,9 @@ int min_depth = 0;
 float planet_rotation_speed = 5.0f; // Degrees per second
 float planet_rotation_angle = 0.0f;
 
+// Forward declare MeshRequest for the struct
+struct MeshRequest;
+
 // Mesh data attached to each quadtree node
 typedef struct {
   Mesh mesh;
@@ -37,92 +39,23 @@ typedef struct {
   float u_min, u_max;
   float v_min, v_max;
   float center_elevation;  // Height at center for LOD distance calc
-  
-  // Async state
-  unsigned int pending_child_ids[4];
-  unsigned int pending_merge_id;
-  bool has_pending_split;
+  uint32_t generation;     // For validating async request node pointers
+
+  // Async state - direct pointers to pending requests
+  struct MeshRequest* pending_child[4];
+  struct MeshRequest* pending_merge;
 } CubicQuadTreeMeshData;
 
-// Temporary storage for meshes ready to be attached
-#define MAX_STAGED_MESHES 64
-typedef struct {
-    unsigned int id;
-    Mesh mesh;
-    bool active;
-} StagedMesh;
+// Global thread pool
+static MeshThreadPool g_mesh_pool;
+static uint32_t g_generation_counter = 1;
 
-static StagedMesh staged_meshes[MAX_STAGED_MESHES] = {0};
-
-// Track cancelled request IDs so we can discard their results when they arrive
-#define MAX_CANCELLED_IDS 256
-static unsigned int cancelled_ids[MAX_CANCELLED_IDS] = {0};
-static int cancelled_ids_count = 0;
-
-void add_cancelled_id(unsigned int id) {
-    if (id == 0) return;
-    if (cancelled_ids_count < MAX_CANCELLED_IDS) {
-        cancelled_ids[cancelled_ids_count++] = id;
-    }
-}
-
-bool is_cancelled_id(unsigned int id) {
-    for (int i = 0; i < cancelled_ids_count; i++) {
-        if (cancelled_ids[i] == id) return true;
-    }
-    return false;
-}
-
-void remove_cancelled_id(unsigned int id) {
-    for (int i = 0; i < cancelled_ids_count; i++) {
-        if (cancelled_ids[i] == id) {
-            cancelled_ids[i] = cancelled_ids[--cancelled_ids_count];
-            return;
-        }
-    }
-}
-
-int get_staged_mesh_count(void) {
-    int count = 0;
-    for(int i=0; i<MAX_STAGED_MESHES; i++) {
-        if (staged_meshes[i].active) count++;
-    }
-    return count;
-}
-
-// Debug: count nodes with pending splits
+// Debug counters
 static int g_pending_split_count = 0;
-static int g_pending_ids_count = 0;  // Total non-zero pending_child_ids across all nodes
+static int g_pending_requests_count = 0;
 static int g_requests_sent_this_frame = 0;
 static int g_splits_cancelled_this_frame = 0;
-
-void add_staged_mesh(unsigned int id, Mesh mesh) {
-    for(int i=0; i<MAX_STAGED_MESHES; i++) {
-        if (!staged_meshes[i].active) {
-            staged_meshes[i].id = id;
-            staged_meshes[i].mesh = mesh;
-            staged_meshes[i].active = true;
-            printf("STAGED id=%u verts=%d slot=%d\n", id, mesh.vertexCount, i);
-            return;
-        }
-    }
-    printf("Staged mesh buffer full! Leaking mesh (Unloading).\n");
-    UnloadMesh(mesh);
-}
-
-Mesh get_and_remove_staged_mesh(unsigned int id) {
-    Mesh m = {0};
-    for(int i=0; i<MAX_STAGED_MESHES; i++) {
-        if (staged_meshes[i].active && staged_meshes[i].id == id) {
-            m = staged_meshes[i].mesh;
-            staged_meshes[i].active = false;
-            printf("CONSUMED id=%u verts=%d slot=%d\n", id, m.vertexCount, i);
-            return m;
-        }
-    }
-    printf("NOT FOUND id=%u\n", id);
-    return m;
-}
+static int g_results_processed_this_frame = 0;
 
 // Root structure holding all 6 face quadtrees
 typedef struct {
@@ -227,6 +160,21 @@ int draw_cubic_quadtree(CubicQuadTree *tree, Vector3 local_camera_pos, Material 
 void cleanup_mesh_data(void *user_data) {
   if (user_data == NULL) return;
   CubicQuadTreeMeshData *mesh_data = (CubicQuadTreeMeshData *)user_data;
+
+  // Cancel any pending subdivision requests
+  for (int i = 0; i < 4; i++) {
+    if (mesh_data->pending_child[i] != NULL) {
+      mesh_pool_cancel(mesh_data->pending_child[i]);
+      mesh_data->pending_child[i] = NULL;
+    }
+  }
+
+  // Cancel any pending merge request
+  if (mesh_data->pending_merge != NULL) {
+    mesh_pool_cancel(mesh_data->pending_merge);
+    mesh_data->pending_merge = NULL;
+  }
+
   UnloadMesh(mesh_data->mesh);
   free(mesh_data);
 }
@@ -245,9 +193,9 @@ float get_center_elevation(CubeFace face, float u_min, float u_max, float v_min,
 
 void *create_child_mesh_data(QuadTreeNode *parent, QuadTreeNode *child, void *parent_user_data) {
   if (parent_user_data == NULL) return NULL;
-  
+
   CubicQuadTreeMeshData *parent_data = (CubicQuadTreeMeshData *)parent_user_data;
-  
+
   // Determine child index (0-3)
   short index = -1;
   for (unsigned short i = 0; i < 4; i++) {
@@ -257,11 +205,11 @@ void *create_child_mesh_data(QuadTreeNode *parent, QuadTreeNode *child, void *pa
     }
   }
   if (index == -1) return NULL;
-  
+
   // Calculate child UV bounds (subdivide parent's UV range)
   float u_mid = (parent_data->u_min + parent_data->u_max) * 0.5f;
   float v_mid = (parent_data->v_min + parent_data->v_max) * 0.5f;
-  
+
   float u_min, u_max, v_min, v_max;
   switch (index) {
     case 0: u_min = parent_data->u_min; u_max = u_mid; v_min = parent_data->v_min; v_max = v_mid; break;
@@ -270,36 +218,46 @@ void *create_child_mesh_data(QuadTreeNode *parent, QuadTreeNode *child, void *pa
     case 3: u_min = u_mid; u_max = parent_data->u_max; v_min = v_mid; v_max = parent_data->v_max; break;
     default: return NULL;
   }
-  
-  // RETRIEVE ASYNC MESH
-  unsigned int id = parent_data->pending_child_ids[index];
-  Mesh mesh = get_and_remove_staged_mesh(id);
-  
-  if (mesh.vertexCount == 0) {
-      // Synchronous fallback (e.g. initial load or error)
-      mesh = create_sphere_patch_mesh(parent_data->face, u_min, u_max, v_min, v_max,
-                                      PLANET_RADIUS, NOISE_SCALE,
-                                      chunk_resolution, SKIRT_DEPTH);
+
+  // Get mesh from the pending request
+  MeshRequest *req = parent_data->pending_child[index];
+  Mesh mesh = {0};
+
+  if (req != NULL && req->result.vertices != NULL) {
+    // Upload CPU mesh to GPU
+    mesh = upload_mesh_gpu(req->result);
+    // Free the request (CPU mesh ownership transferred to GPU mesh)
+    mesh_pool_free_request(req);
+    parent_data->pending_child[index] = NULL;
   }
-  
+
+  if (mesh.vertexCount == 0) {
+    // Synchronous fallback (e.g., initial load or error)
+    mesh = create_sphere_patch_mesh(parent_data->face, u_min, u_max, v_min, v_max,
+                                    PLANET_RADIUS, NOISE_SCALE,
+                                    chunk_resolution, SKIRT_DEPTH);
+  }
+
   CubicQuadTreeMeshData *child_data = malloc(sizeof(CubicQuadTreeMeshData));
   if (child_data == NULL) {
     UnloadMesh(mesh);
     return NULL;
   }
-  
+
   child_data->mesh = mesh;
   child_data->face = parent_data->face;
   child_data->u_min = u_min;
   child_data->u_max = u_max;
   child_data->v_min = v_min;
   child_data->v_max = v_max;
-  child_data->center_elevation = get_center_elevation(parent_data->face, u_min, u_max, 
+  child_data->center_elevation = get_center_elevation(parent_data->face, u_min, u_max,
                                                        v_min, v_max, PLANET_RADIUS, NOISE_SCALE);
+  child_data->generation = g_generation_counter++;
+
   // Init async state
-  child_data->has_pending_split = false;
-  for(int i=0; i<4; i++) child_data->pending_child_ids[i] = 0;
-  
+  for (int i = 0; i < 4; i++) child_data->pending_child[i] = NULL;
+  child_data->pending_merge = NULL;
+
   return child_data;
 }
 
@@ -424,12 +382,18 @@ float get_screen_space_size(float world_size, float distance, float fov_degrees,
   return (world_size / distance) * projection_factor;
 }
 
-static unsigned int global_req_id = 1;
+// Check if a node has any pending subdivision requests
+static bool has_pending_split(CubicQuadTreeMeshData *data) {
+  for (int i = 0; i < 4; i++) {
+    if (data->pending_child[i] != NULL) return true;
+  }
+  return false;
+}
 
 // Process single face quadtree for LOD based on screen-space error
 void process_face_lod(QuadTreeNode *node, Vector3 camera_pos, float camera_fov, int screen_height, int max_depth) {
   if (node == NULL) return;
-  
+
   // Check if this is a leaf node FIRST (before checking user_data)
   bool is_leaf = true;
   for (unsigned short i = 0; i < 4; i++) {
@@ -438,7 +402,7 @@ void process_face_lod(QuadTreeNode *node, Vector3 camera_pos, float camera_fov, 
       break;
     }
   }
-  
+
   if (!is_leaf) {
     // Non-leaf: recurse into children (user_data is NULL for non-leaves, that's correct)
     for (unsigned short i = 0; i < 4; i++) {
@@ -446,290 +410,191 @@ void process_face_lod(QuadTreeNode *node, Vector3 camera_pos, float camera_fov, 
     }
     return;
   }
-  
+
   // Leaf node: must have user_data
   if (node->user_data == NULL) {
     printf("ERROR: Leaf at depth %d has NULL user_data!\n", node->depth);
     return;
   }
-  
+
   CubicQuadTreeMeshData *data = (CubicQuadTreeMeshData *)node->user_data;
 
   // Debug tracking
-  if (data->has_pending_split) g_pending_split_count++;
+  if (has_pending_split(data)) g_pending_split_count++;
   for (int i = 0; i < 4; i++) {
-      if (data->pending_child_ids[i] != 0) g_pending_ids_count++;
+    if (data->pending_child[i] != NULL) g_pending_requests_count++;
   }
 
   float distance = get_chunk_distance(data, camera_pos);
   float chunk_size = get_chunk_world_size(data);
-  
+
   // Screen-space error: how many pixels does this chunk cover?
   float screen_pixels = get_screen_space_size(chunk_size, distance, camera_fov, screen_height);
-  
+
   // Subdivide if chunk covers more than threshold pixels on screen OR if below min_depth
   if ((screen_pixels > SUBDIVIDE_PIXEL_THRESHOLD || node->depth < min_depth) && node->depth < max_depth) {
-      
-      // If not splitting yet, start the process
-      if (!data->has_pending_split) {
-          data->has_pending_split = true;
-          // Clean ensure IDs are 0
-          for(int i=0; i<4; i++) data->pending_child_ids[i] = 0;
+
+    // Enqueue requests for any children not yet requested
+    float u_mid = (data->u_min + data->u_max) * 0.5f;
+    float v_mid = (data->v_min + data->v_max) * 0.5f;
+
+    for (int i = 0; i < 4; i++) {
+      if (data->pending_child[i] == NULL) {
+        // Need to send this request
+        float u_min, u_max, v_min, v_max;
+        switch (i) {
+          case 0: u_min = data->u_min; u_max = u_mid; v_min = data->v_min; v_max = v_mid; break;
+          case 1: u_min = u_mid; u_max = data->u_max; v_min = data->v_min; v_max = v_mid; break;
+          case 2: u_min = data->u_min; u_max = u_mid; v_min = v_mid; v_max = data->v_max; break;
+          case 3: u_min = u_mid; u_max = data->u_max; v_min = v_mid; v_max = data->v_max; break;
+          default: continue;
+        }
+
+        MeshRequest *req = mesh_pool_enqueue(&g_mesh_pool,
+                                             REQUEST_SUBDIVIDE,
+                                             data->face,
+                                             u_min, u_max, v_min, v_max,
+                                             PLANET_RADIUS, NOISE_SCALE,
+                                             chunk_resolution, SKIRT_DEPTH,
+                                             node->depth + 1,
+                                             data,
+                                             data->generation,
+                                             i);
+        if (req != NULL) {
+          data->pending_child[i] = req;
+          g_requests_sent_this_frame++;
+        }
+        // If NULL (alloc failed), will retry next frame
       }
-      
-      // Ensure all 4 requests are sent
-      float u_mid = (data->u_min + data->u_max) * 0.5f;
-      float v_mid = (data->v_min + data->v_max) * 0.5f;
-      bool all_sent = true;
-      
-      for(int i=0; i<4; i++) {
-          if (data->pending_child_ids[i] == 0) {
-              // Need to send this request
-              ChunkGenerationParams params = {
-                  .face = data->face,
-                  .radius = PLANET_RADIUS,
-                  .noise_scale = NOISE_SCALE,
-                  .resolution = chunk_resolution,
-                  .skirt_depth = SKIRT_DEPTH,
-                  .depth = node->depth + 1,
-                  .id = global_req_id  // Don't increment yet
-              };
-              
-              switch(i) {
-                  case 0: params.u_min = data->u_min; params.u_max = u_mid; params.v_min = data->v_min; params.v_max = v_mid; break;
-                  case 1: params.u_min = u_mid; params.u_max = data->u_max; params.v_min = data->v_min; params.v_max = v_mid; break;
-                  case 2: params.u_min = data->u_min; params.u_max = u_mid; params.v_min = v_mid; params.v_max = data->v_max; break;
-                  case 3: params.u_min = u_mid; params.u_max = data->u_max; params.v_min = v_mid; params.v_max = data->v_max; break;
-              }
-               Vector3 center = cube_face_to_sphere_point(params.face, 
-                            (params.u_min + params.u_max)*0.5f,
-                            (params.v_min + params.v_max)*0.5f, PLANET_RADIUS);
-               params.center_pos = center;
-               
-              if (async_loader_request(params)) {
-                  data->pending_child_ids[i] = params.id;
-                  global_req_id++;  // Only increment after successful enqueue
-                  g_requests_sent_this_frame++;
-              } else {
-                  // Queue full. Keep ID as 0 to retry next frame.
-                  all_sent = false;
-              }
-          }
+    }
+
+    // Check if all 4 children are ready
+    bool all_ready = true;
+    for (int i = 0; i < 4; i++) {
+      MeshRequest *req = data->pending_child[i];
+      if (req == NULL) {
+        all_ready = false;
+        break;
       }
-      
-      if (!all_sent) {
-          return; // Wait for next frame to try sending remaining requests
+      MeshRequestStatus status = atomic_load(&req->status);
+      if (status != REQUEST_READY) {
+        all_ready = false;
+        break;
       }
-      
-      // Check if all 4 children are ready in the staging area
-      bool all_ready = true;
-      for(int i=0; i<4; i++) {
-          bool found = false;
-          unsigned int needed_id = data->pending_child_ids[i];
-          
-          if (needed_id == 0) { 
-              // Should not happen if all_sent is true, but safety check
-              all_ready = false; 
-              break; 
-          }
-          
-          // Check staged meshes
-          for(int j=0; j<MAX_STAGED_MESHES; j++) {
-              if (staged_meshes[j].active && staged_meshes[j].id == needed_id) {
-                  found = true;
-                  
-                  // Check if it was a failed/skipped result
-                  if (staged_meshes[j].mesh.vertexCount == 0) {
-                      // Abort split.
-                       data->has_pending_split = false;
-                       get_and_remove_staged_mesh(needed_id);
-                       // Optimization: We could consume others if we found them, 
-                       // but looping again is safer to find all pending.
-                       all_ready = false;
-                       break;
-                  }
-                  break;
-              }
-          }
-          
-          if (!found) {
-               // Still waiting.
-               all_ready = false;
-               break;
-          }
-      }
-      
-      if (!all_ready && !data->has_pending_split) {
-           // We aborted inside the loop due to failure. Clean up others.
-           for(int i=0; i<4; i++) {
-               if (data->pending_child_ids[i] != 0) {
-                   get_and_remove_staged_mesh(data->pending_child_ids[i]); // Clean staging
-                   data->pending_child_ids[i] = 0;
-               }
-           }
-           return;
-      }
-      
-      if (all_ready) {
-          subdivide_quadtree_node(node, create_child_mesh_data, cleanup_mesh_data);
-          // Note: data (parent's user_data) has been freed by cleanup_mesh_data
-          // No need to clear state - the parent is no longer a leaf
-          return;  // Parent is no longer a leaf, don't touch freed data
-      }
+    }
+
+    if (all_ready) {
+      subdivide_quadtree_node(node, create_child_mesh_data, cleanup_mesh_data);
+      // Note: data (parent's user_data) has been freed by cleanup_mesh_data
+      return;  // Parent is no longer a leaf, don't touch freed data
+    }
   } else {
-      // No longer need to subdivide - cancel any pending split
-      if (data->has_pending_split) {
-          g_splits_cancelled_this_frame++;
-          for (int i = 0; i < 4; i++) {
-              if (data->pending_child_ids[i] != 0) {
-                  // Try to remove from staged, but also mark as cancelled
-                  // in case it hasn't arrived yet
-                  get_and_remove_staged_mesh(data->pending_child_ids[i]);
-                  add_cancelled_id(data->pending_child_ids[i]);
-                  data->pending_child_ids[i] = 0;
-              }
-          }
-          data->has_pending_split = false;
+    // No longer need to subdivide - cancel any pending requests
+    if (has_pending_split(data)) {
+      g_splits_cancelled_this_frame++;
+      for (int i = 0; i < 4; i++) {
+        if (data->pending_child[i] != NULL) {
+          mesh_pool_cancel(data->pending_child[i]);
+          // Don't free here - will be freed when drained from completed list
+          data->pending_child[i] = NULL;
+        }
       }
+    }
   }
 }
 
 // Merge distant chunks back to parent (called after subdivision pass)
 void merge_face_lod(QuadTreeNode *node, Vector3 camera_pos, float camera_fov, int screen_height) {
   if (node == NULL) return;
-  
+
   // Only process non-leaf nodes
   if (node->children[0] == NULL) return;
-  
+
   // Recurse into children first (bottom-up merge)
   for (unsigned short i = 0; i < 4; i++) {
     merge_face_lod(node->children[i], camera_pos, camera_fov, screen_height);
   }
-  
+
   // Check if all children are now leaves (with null safety)
   for (unsigned short i = 0; i < 4; i++) {
     if (node->children[i] == NULL || node->children[i]->children[0] != NULL) {
       return;  // Child missing or has grandchildren, can't merge
     }
   }
-  
+
   // Check if all children are small enough on screen to merge
   // Use lower threshold than subdivide to provide hysteresis and prevent flicker
   for (unsigned short i = 0; i < 4; i++) {
     if (node->children[i]->user_data == NULL) continue;
-    
+
     CubicQuadTreeMeshData *child_data = (CubicQuadTreeMeshData *)node->children[i]->user_data;
     float distance = get_chunk_distance(child_data, camera_pos);
     float chunk_size = get_chunk_world_size(child_data);
     float screen_pixels = get_screen_space_size(chunk_size, distance, camera_fov, screen_height);
-    
+
     // If any child is still large enough on screen, don't merge
     if (screen_pixels > MERGE_PIXEL_THRESHOLD) {
       return;
     }
   }
 
-  // If node depth is less than min_depth, we cannot merge (we need to be at least min_depth deep)
-  // Wait... merge happens at parent node. If parent node depth < min_depth, that means parent IS min_depth - 1. 
-  // We want to KEEP children if parent_depth < min_depth.
-  // Actually, node->depth is the depth of the PARENT node.
-  // If node->depth < min_depth, we should NOT have children at all... wait.
-  // If min_depth is 2. Root is depth 0. We want depth 0 to split to 1, 1 to split to 2. 
-  // We want to merge depth 2 nodes back to depth 1 ONLY if depth 1 >= min_depth.
-  // So if min_depth is 2, we can merge depth 3 to depth 2. But we CANNOT merge depth 2 to depth 1.
+  // If node depth is less than min_depth, don't merge
   if (node->depth < min_depth) {
     return;
   }
-  
+
   // All children are small on screen - merge them back to parent
   // First, get parent's UV bounds from first child
   CubicQuadTreeMeshData *first_child = (CubicQuadTreeMeshData *)node->children[0]->user_data;
   if (first_child == NULL) return;  // Safety check
   CubeFace face = first_child->face;
-  
+
   // Calculate parent UV bounds (double the child's range)
   float u_size = first_child->u_max - first_child->u_min;
   float v_size = first_child->v_max - first_child->v_min;
   float u_min = first_child->u_min;
   float v_min = first_child->v_min;
-  
-  // Find the actual bounds from all children (assuming standard quadrant layout)
-  // Or just reconstruct from known child 0 (it is always u_min, v_min relative to parent?)
-  // Children layout:
-  // 0: u_min, v_min
-  // 1: u_mid, v_min
-  // 2: u_min, v_mid
-  // 3: u_mid, v_mid
-  // So child 0's min is parent's min.
-  // We can verify this but for this specific tree structure it's consistent.
-  
   float u_max = u_min + u_size * 2;
   float v_max = v_min + v_size * 2;
 
-  // ASYNC MERGE
-  // We attach the pending request ID to the first child for tracking
-  if (first_child->pending_merge_id == 0) {
-      // Request generation of the parent mesh (lower resolution relative to world size, but same grid res)
-      ChunkGenerationParams params = {
-          .face = face,
-          .radius = PLANET_RADIUS,
-          .noise_scale = NOISE_SCALE,
-          .resolution = chunk_resolution,
-          .skirt_depth = SKIRT_DEPTH,
-          .u_min = u_min, .u_max = u_max,
-          .v_min = v_min, .v_max = v_max,
-          .depth = node->depth, // Parent depth
-          .center_pos = cube_face_to_sphere_point(face,
-                                (u_min + u_max)*0.5f,
-                                (v_min + v_max)*0.5f, PLANET_RADIUS),
-          .id = global_req_id  // Don't increment yet
-      };
-
-      if (async_loader_request(params)) {
-          first_child->pending_merge_id = params.id;
-          global_req_id++;  // Only increment after successful enqueue
-      }
-      // If queue full, pending_merge_id stays 0, will retry next frame
+  // ASYNC MERGE - use first child's pending_merge to track the request
+  if (first_child->pending_merge == NULL) {
+    // Request generation of the parent mesh
+    MeshRequest *req = mesh_pool_enqueue(&g_mesh_pool,
+                                         REQUEST_MERGE,
+                                         face,
+                                         u_min, u_max, v_min, v_max,
+                                         PLANET_RADIUS, NOISE_SCALE,
+                                         chunk_resolution, SKIRT_DEPTH,
+                                         node->depth,
+                                         first_child,
+                                         first_child->generation,
+                                         -1);  // -1 indicates merge request
+    if (req != NULL) {
+      first_child->pending_merge = req;
+      g_requests_sent_this_frame++;
+    }
+    // If NULL, will retry next frame
   } else {
-      // Check if result is ready
-      Mesh parent_mesh = {0};
-      bool found = false;
-      unsigned int needed_id = first_child->pending_merge_id;
-      
-      // Check staged meshes
-      for(int j=0; j<MAX_STAGED_MESHES; j++) {
-          if (staged_meshes[j].active && staged_meshes[j].id == needed_id) {
-              if (staged_meshes[j].mesh.vertexCount > 0) {
-                  parent_mesh = staged_meshes[j].mesh;
-                  found = true;
-              } else {
-                  // Failed generation (invalid). Reset.
-                  first_child->pending_merge_id = 0;
-                  get_and_remove_staged_mesh(needed_id);
-                  return; // Try again next frame
-              }
-              // Mark as consumed (will be removed below)
-              staged_meshes[j].active = false; 
-              break;
-          }
-      }
-      
-       if (!found) {
-           // If not pending/staged, it was dropped/lost. Reset.
-           if (!async_loader_is_pending(needed_id)) {
-               first_child->pending_merge_id = 0; 
-           }
-           return; // Still waiting
-       }
-      
-      // Merge is ready!
+    // Check if result is ready
+    MeshRequest *req = first_child->pending_merge;
+    MeshRequestStatus status = atomic_load(&req->status);
+
+    if (status == REQUEST_READY && req->result.vertices != NULL) {
+      // Upload mesh to GPU
+      Mesh parent_mesh = upload_mesh_gpu(req->result);
+
+      // Free the request
+      mesh_pool_free_request(req);
+      first_child->pending_merge = NULL;
+
       // Clean up children
       for (unsigned short i = 0; i < 4; i++) {
         cleanup_mesh_data(node->children[i]->user_data);
         free(node->children[i]);
         node->children[i] = NULL;
       }
-      
+
       // Assign parent mesh
       CubicQuadTreeMeshData *parent_data = malloc(sizeof(CubicQuadTreeMeshData));
       if (parent_data) {
@@ -741,14 +606,20 @@ void merge_face_lod(QuadTreeNode *node, Vector3 camera_pos, float camera_fov, in
         parent_data->mesh = parent_mesh;
         parent_data->center_elevation = get_center_elevation(face, u_min, u_max, v_min, v_max,
                                                               PLANET_RADIUS, NOISE_SCALE);
-        parent_data->has_pending_split = false;
-        for(int i=0; i<4; i++) parent_data->pending_child_ids[i] = 0;
-        parent_data->pending_merge_id = 0; // Clear
-        
+        parent_data->generation = g_generation_counter++;
+        for (int i = 0; i < 4; i++) parent_data->pending_child[i] = NULL;
+        parent_data->pending_merge = NULL;
+
         node->user_data = parent_data;
       } else {
-           UnloadMesh(parent_mesh); // Safety
+        UnloadMesh(parent_mesh);
       }
+    } else if (status == REQUEST_CANCELLED) {
+      // Request was cancelled, clear and retry
+      mesh_pool_free_request(req);
+      first_child->pending_merge = NULL;
+    }
+    // Otherwise still waiting
   }
 }
 
@@ -809,7 +680,10 @@ CubicQuadTree *create_cubic_quadtree(float radius, float noise_scale) {
                                                 radius, noise_scale, chunk_resolution, SKIRT_DEPTH);
     root_data->center_elevation = get_center_elevation((CubeFace)face, -1.0f, 1.0f, -1.0f, 1.0f,
                                                         radius, noise_scale);
-    
+    root_data->generation = g_generation_counter++;
+    for (int j = 0; j < 4; j++) root_data->pending_child[j] = NULL;
+    root_data->pending_merge = NULL;
+
     tree->faces[face]->user_data = root_data;
   }
   
@@ -836,8 +710,12 @@ int main(void) {
   SetTargetFPS(60);
   ToggleBorderlessWindowed();
   
-  // Initialize Async Loader
-  async_loader_init();
+  // Initialize mesh thread pool
+  if (!mesh_pool_init(&g_mesh_pool)) {
+    printf("Failed to initialize mesh thread pool\n");
+    CloseWindow();
+    return -1;
+  }
   
   // Create cubic quadtree (single face for testing)
   CubicQuadTree *planet = create_cubic_quadtree(PLANET_RADIUS, NOISE_SCALE);
@@ -1046,38 +924,49 @@ int main(void) {
     t_lod_start = GetTime();
 
     // --- ASYNC PROCESSING ---
-    async_loader_update_state(local_camera_pos, SUBDIVIDE_PIXEL_THRESHOLD, screenHeight, camera.fovy);
+    // Drain completed requests and free cancelled ones
+    g_results_processed_this_frame = 0;
+    MeshRequest *completed = mesh_pool_drain_completed(&g_mesh_pool);
+    while (completed != NULL) {
+      MeshRequest *next = completed->next;
+      MeshRequestStatus status = atomic_load(&completed->status);
 
-    // Poll results
-    ChunkGenerationResult res;
-    while(async_loader_get_result(&res)) {
-        // Check if this result was cancelled
-        if (is_cancelled_id(res.id)) {
-            remove_cancelled_id(res.id);
-            if (res.valid) {
-                free_cpu_mesh(&res.mesh);  // Discard the CPU mesh data
-            }
-            printf("DISCARDED cancelled id=%u\n", res.id);
-            continue;
+      if (status == REQUEST_CANCELLED) {
+        // Cancelled - free CPU mesh if generated
+        if (completed->result.vertices != NULL) {
+          free_cpu_mesh(&completed->result);
         }
+      }
+      // For READY requests, the mesh stays in the request
+      // until create_child_mesh_data or merge_face_lod consumes it
 
-        if (res.valid) {
-            Mesh m = upload_mesh_gpu(res.mesh); // Upload to VRAM
-            // Note: upload_mesh_gpu transfers ownership of pointers to m.vertices etc.
-            // DO NOT call free_cpu_mesh(&res.mesh) here!
-            add_staged_mesh(res.id, m);
-        } else {
-             // Invalid/skipped.
-             // Stage an empty mesh so we know the request 'completed' (but failed/skipped)
-             Mesh empty = {0};
-             add_staged_mesh(res.id, empty);
+      // Only free if no node is holding a reference
+      // Check if the request is still referenced by a node
+      CubicQuadTreeMeshData *node_data = (CubicQuadTreeMeshData *)completed->node;
+      bool still_referenced = false;
+
+      if (node_data != NULL && node_data->generation == completed->node_generation) {
+        // Node is still valid - check if it still points to this request
+        if (completed->child_index >= 0 && completed->child_index < 4) {
+          still_referenced = (node_data->pending_child[completed->child_index] == completed);
+        } else if (completed->child_index == -1) {
+          still_referenced = (node_data->pending_merge == completed);
         }
+      }
+
+      if (!still_referenced && status == REQUEST_CANCELLED) {
+        // Not referenced and cancelled - safe to free
+        mesh_pool_free_request(completed);
+      }
+      // If still referenced, leave it for LOD processing to handle
+
+      g_results_processed_this_frame++;
+      completed = next;
     }
 
     // LOD processing
-    t_lod_start = GetTime();
     g_pending_split_count = 0;
-    g_pending_ids_count = 0;
+    g_pending_requests_count = 0;
     g_requests_sent_this_frame = 0;
     g_splits_cancelled_this_frame = 0;
     if (enable_lod) {
@@ -1240,21 +1129,17 @@ int main(void) {
     DrawText(TextFormat("Total CPU Work: %.2f ms", lod_ms + shadow_ms + render_ms), 10, 320, 20, GREEN);
     DrawText(TextFormat("Active Vertices: %d", vertexCount), 10, 350, 20, GREEN);
 
-    // Async loader debug stats
-    AsyncLoaderStats async_stats;
-    async_loader_get_stats(&async_stats);
-    DrawText(TextFormat("Async: Req Q: %d | Result Q: %d | Staged: %d",
-             async_stats.request_queue_count, async_stats.result_queue_count, get_staged_mesh_count()),
+    // Mesh thread pool debug stats
+    MeshPoolStats pool_stats = mesh_pool_get_stats(&g_mesh_pool);
+    DrawText(TextFormat("Pool: Queued: %d | Completed: %d | Threads: %d",
+             pool_stats.queued_count, pool_stats.completed_count, pool_stats.thread_count),
              10, 380, 20, ORANGE);
-    DrawText(TextFormat("Async Total: Processed: %d | Skipped: %d | Next ID: %u",
-             async_stats.total_processed, async_stats.total_skipped, global_req_id),
+    DrawText(TextFormat("Frame: Sent: %d | Processed: %d | Cancelled: %d",
+             g_requests_sent_this_frame, g_results_processed_this_frame, g_splits_cancelled_this_frame),
              10, 410, 20, ORANGE);
-    DrawText(TextFormat("Worker: loops=%d waiting=%d",
-             async_stats.worker_loop_count, async_stats.worker_waiting),
-             10, 440, 20, async_stats.worker_waiting ? RED : LIME);
-    DrawText(TextFormat("Pending: splits=%d child_ids=%d | Sent: %d | Cancelled: %d",
-             g_pending_split_count, g_pending_ids_count, g_requests_sent_this_frame, g_splits_cancelled_this_frame),
-             10, 470, 20, SKYBLUE);
+    DrawText(TextFormat("Pending: splits=%d requests=%d",
+             g_pending_split_count, g_pending_requests_count),
+             10, 440, 20, SKYBLUE);
 
     DrawFPS(screenWidth - 100, 10);
     
@@ -1262,7 +1147,7 @@ int main(void) {
   }
   
   // Cleanup
-  async_loader_shutdown();
+  mesh_pool_shutdown(&g_mesh_pool);
   for (unsigned short i = 0; i < CASCADE_COUNT; i++) {
     UnloadRenderTexture(shadowMaps[i]);
   }
