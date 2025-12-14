@@ -41,7 +41,8 @@ int main(void) {
   // ===== Shadow maps ===== ffffffff
   // Set up the light direction
   float lightYaw = 120.0f;
-  float lightPitch = -25.0f;
+  float lightPitch
+  d= -25.0f;
   Vector3 lightDir = {cosf(lightPitch * DEG2RAD) * cosf(lightYaw * DEG2RAD),
                       sinf(lightPitch * DEG2RAD),
                       cosf(lightPitch * DEG2RAD) * sinf(lightYaw * DEG2RAD)};

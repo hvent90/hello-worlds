@@ -369,11 +369,16 @@ Mesh create_triangle_mesh(float scale) {
 
 // ===== Sphere Patch Mesh for Cubic Quadtree =====
 
-Mesh create_sphere_patch_mesh(CubeFace face,
-                               float u_min, float u_max,
-                               float v_min, float v_max,
-                               float radius, float noise_scale,
-                               int resolution, float skirt_depth) {
+// ===== Sphere Patch Mesh for Cubic Quadtree =====
+
+// Generate mesh data on CPU (no GPU dependence)
+CpuMesh generate_sphere_patch_cpu(CubeFace face, 
+                                 float u_min, float u_max, 
+                                 float v_min, float v_max,
+                                 float radius, float noise_scale,
+                                 int resolution, float skirt_depth) {
+  CpuMesh cpu_mesh = {0};
+
   // Main grid vertices: (resolution+1) x (resolution+1)
   const int grid_size = resolution + 1;
   const int main_vertex_count = grid_size * grid_size;
@@ -401,8 +406,6 @@ Mesh create_sphere_patch_mesh(CubeFace face,
   unsigned short *indices = malloc(total_index_count * sizeof(unsigned short));
   Vector3 *normals = malloc(total_vertex_count * sizeof(Vector3));
   
-  Mesh mesh = {0};
-  
   if (!ext_vertices || !ext_normals || !vertices || !indices || !normals) {
     fprintf(stderr, "Sphere patch mesh allocation failed\n");
     free(ext_vertices);
@@ -410,7 +413,7 @@ Mesh create_sphere_patch_mesh(CubeFace face,
     free(vertices);
     free(indices);
     free(normals);
-    return mesh;
+    return cpu_mesh;
   }
   
   // UV step for the main grid
@@ -692,21 +695,79 @@ Mesh create_sphere_patch_mesh(CubeFace face,
     }
   }
   
-  // Populate mesh
-  mesh.vertexCount = total_vertex_count;
-  mesh.triangleCount = total_triangle_count;
-  mesh.vertices = (float *)vertices;
-  mesh.indices = indices;
-  mesh.normals = (float *)normals;
+  cpu_mesh.vertices = (float*)vertices;
+  cpu_mesh.normals = (float*)normals;
+  cpu_mesh.indices = indices;
+  cpu_mesh.vertexCount = total_vertex_count;
+  cpu_mesh.triangleCount = total_triangle_count;
   
+  return cpu_mesh;
+}
+
+Mesh upload_mesh_gpu(CpuMesh cpu_mesh) {
+  Mesh mesh = {0};
+  
+  if (cpu_mesh.vertexCount == 0 || cpu_mesh.triangleCount == 0) return mesh;
+  
+  mesh.vertexCount = cpu_mesh.vertexCount;
+  mesh.triangleCount = cpu_mesh.triangleCount;
+  mesh.vertices = cpu_mesh.vertices;
+  mesh.normals = cpu_mesh.normals;
+  mesh.indices = cpu_mesh.indices;
+  
+  // NOTE: UploadMesh in Raylib (mostly) copies the data, but for dynamic mesh generation
+  // we often want to transfer ownership or copy. 
+  // Raylib's UploadMesh does NOT free the pointers.
+  // However, it does expect 'vertices', 'normals', etc. to be valid pointers.
   UploadMesh(&mesh, false);
+  
   if (mesh.vaoId == 0) {
     fprintf(stderr, "Sphere patch mesh upload failed\n");
-    free(vertices);
-    free(indices);
-    free(normals);
-    mesh = (Mesh){0};
   }
   
   return mesh;
+}
+
+void free_cpu_mesh(CpuMesh *cpu_mesh) {
+  if (cpu_mesh->vertices) free(cpu_mesh->vertices);
+  if (cpu_mesh->normals) free(cpu_mesh->normals);
+  if (cpu_mesh->indices) free(cpu_mesh->indices);
+  cpu_mesh->vertices = NULL;
+  cpu_mesh->normals = NULL;
+  cpu_mesh->indices = NULL;
+  cpu_mesh->vertexCount = 0;
+  cpu_mesh->triangleCount = 0;
+}
+
+Mesh create_sphere_patch_mesh(CubeFace face,
+                               float u_min, float u_max,
+                               float v_min, float v_max,
+                               float radius, float noise_scale,
+                               int resolution, float skirt_depth) {
+    // Synchronous generation for compatibility
+    CpuMesh cpu_mesh = generate_sphere_patch_cpu(face, u_min, u_max, v_min, v_max, 
+                                                radius, noise_scale, resolution, skirt_depth);
+    Mesh mesh = upload_mesh_gpu(cpu_mesh);
+    // After upload, we don't need CPU data anymore for static meshes
+    // Raylib UploadMesh uploads to VRAM. We must not free the pointers IF we want to keep them 
+    // in CPU memory for collision etc., but for rendering-only meshes we can free them.
+    // However, Raylib's UnloadMesh frees the pointers! 
+    // Wait, Check Raylib source/docs:
+    // "UnloadMesh: Unload mesh data from CPU and GPU" -> checks if vertices != NULL and frees them.
+    // So we MUST leave the pointers in the Mesh struct if we want UnloadMesh to clean them up.
+    // If we free them here, UnloadMesh will double-free or crash.
+    // 
+    // BUT: In our new async architecture, `upload_mesh_gpu` assigns the pointers to `mesh.vertices`.
+    // So `mesh` OWNS the pointers now.
+    // We should therefore NOT call `free_cpu_mesh` here if we passed the pointers to `mesh`.
+    
+    // Correct behavior:
+    // 1. generate -> allocates Malloc
+    // 2. upload -> assigns Malloc ptrs to Mesh struct, calls UploadMesh (which sends to VRAM).
+    // 3. Return Mesh.
+    // 4. Eventually user calls UnloadMesh -> frees Malloc ptrs + VRAM.
+    
+    // So we do NOTHING here regarding freeing.
+    
+    return mesh;                                            
 }

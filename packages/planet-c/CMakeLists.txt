@@ -69,7 +69,8 @@ add_executable(quadtree_cubic
   src/quadtree.c
   src/mesh.c
   src/noise.c
-  src/cube_face.c)
+  src/cube_face.c
+  src/async_loader.c)
 
 # Include directories
 target_include_directories(planet_example PRIVATE src)
@@ -79,13 +80,13 @@ target_include_directories(quadtree_cubic PRIVATE src)
 
 # Link libraries for quadtree_example
 if (UNIX)
-    target_link_libraries(quadtree_example PRIVATE m raylib)
-    target_link_libraries(quadtree_mesh PRIVATE m raylib)
-    target_link_libraries(quadtree_cubic PRIVATE m raylib)
+    target_link_libraries(quadtree_example PRIVATE m raylib Threads::Threads)
+    target_link_libraries(quadtree_mesh PRIVATE m raylib Threads::Threads)
+    target_link_libraries(quadtree_cubic PRIVATE m raylib Threads::Threads)
 else()
-    target_link_libraries(quadtree_example PRIVATE raylib)
-    target_link_libraries(quadtree_mesh PRIVATE raylib)
-    target_link_libraries(quadtree_cubic PRIVATE raylib)
+    target_link_libraries(quadtree_example PRIVATE raylib Threads::Threads)
+    target_link_libraries(quadtree_mesh PRIVATE raylib Threads::Threads)
+    target_link_libraries(quadtree_cubic PRIVATE raylib Threads::Threads)
 endif()
 
 # Link math library on Unix-like systems (not needed on Windows)

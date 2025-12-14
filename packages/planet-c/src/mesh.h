@@ -23,4 +23,34 @@ Mesh create_sphere_patch_mesh(CubeFace face,
                                float radius, float noise_scale,
                                int resolution, float skirt_depth);
 
+// CPU-side mesh data (no GPU dependence)
+typedef struct {
+  float *vertices;
+  float *normals;
+  unsigned short *indices;
+  int vertexCount;
+  int triangleCount;
+} CpuMesh;
+
+// Generate mesh data on CPU (thread-safe)
+CpuMesh generate_sphere_patch_cpu(CubeFace face, 
+                                 float u_min, float u_max, 
+                                 float v_min, float v_max,
+                                 float radius, float noise_scale,
+                                 int resolution, float skirt_depth);
+
+// Upload CPU mesh data to GPU (Main thread only)
+Mesh upload_mesh_gpu(CpuMesh cpu_mesh);
+
+// Helper to free CPU mesh data
+void free_cpu_mesh(CpuMesh *cpu_mesh);
+
+// Sphere patch mesh for cubic quadtree planet rendering
+// ... (previous comments)
+Mesh create_sphere_patch_mesh(CubeFace face, 
+                               float u_min, float u_max, 
+                               float v_min, float v_max,
+                               float radius, float noise_scale,
+                               int resolution, float skirt_depth);
+
 #endif

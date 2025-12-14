@@ -7,11 +7,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 // clang-format off
+// clang-format off
 #include "shadow.h"
 #include "camera.h"
 #include "quadtree.h"
 #include "mesh.h"
 #include "cube_face.h"
+#include "async_loader.h"
 // clang-format on
 
 // Planet configuration
@@ -24,6 +26,10 @@ const float SKIRT_DEPTH = 4000.0f;        // Skirt depth to hide seams (must be 
 int chunk_resolution = 32;
 int min_depth = 0;
 
+// Planet rotation state
+float planet_rotation_speed = 5.0f; // Degrees per second
+float planet_rotation_angle = 0.0f;
+
 // Mesh data attached to each quadtree node
 typedef struct {
   Mesh mesh;
@@ -31,7 +37,92 @@ typedef struct {
   float u_min, u_max;
   float v_min, v_max;
   float center_elevation;  // Height at center for LOD distance calc
+  
+  // Async state
+  unsigned int pending_child_ids[4];
+  unsigned int pending_merge_id;
+  bool has_pending_split;
 } CubicQuadTreeMeshData;
+
+// Temporary storage for meshes ready to be attached
+#define MAX_STAGED_MESHES 64
+typedef struct {
+    unsigned int id;
+    Mesh mesh;
+    bool active;
+} StagedMesh;
+
+static StagedMesh staged_meshes[MAX_STAGED_MESHES] = {0};
+
+// Track cancelled request IDs so we can discard their results when they arrive
+#define MAX_CANCELLED_IDS 256
+static unsigned int cancelled_ids[MAX_CANCELLED_IDS] = {0};
+static int cancelled_ids_count = 0;
+
+void add_cancelled_id(unsigned int id) {
+    if (id == 0) return;
+    if (cancelled_ids_count < MAX_CANCELLED_IDS) {
+        cancelled_ids[cancelled_ids_count++] = id;
+    }
+}
+
+bool is_cancelled_id(unsigned int id) {
+    for (int i = 0; i < cancelled_ids_count; i++) {
+        if (cancelled_ids[i] == id) return true;
+    }
+    return false;
+}
+
+void remove_cancelled_id(unsigned int id) {
+    for (int i = 0; i < cancelled_ids_count; i++) {
+        if (cancelled_ids[i] == id) {
+            cancelled_ids[i] = cancelled_ids[--cancelled_ids_count];
+            return;
+        }
+    }
+}
+
+int get_staged_mesh_count(void) {
+    int count = 0;
+    for(int i=0; i<MAX_STAGED_MESHES; i++) {
+        if (staged_meshes[i].active) count++;
+    }
+    return count;
+}
+
+// Debug: count nodes with pending splits
+static int g_pending_split_count = 0;
+static int g_pending_ids_count = 0;  // Total non-zero pending_child_ids across all nodes
+static int g_requests_sent_this_frame = 0;
+static int g_splits_cancelled_this_frame = 0;
+
+void add_staged_mesh(unsigned int id, Mesh mesh) {
+    for(int i=0; i<MAX_STAGED_MESHES; i++) {
+        if (!staged_meshes[i].active) {
+            staged_meshes[i].id = id;
+            staged_meshes[i].mesh = mesh;
+            staged_meshes[i].active = true;
+            printf("STAGED id=%u verts=%d slot=%d\n", id, mesh.vertexCount, i);
+            return;
+        }
+    }
+    printf("Staged mesh buffer full! Leaking mesh (Unloading).\n");
+    UnloadMesh(mesh);
+}
+
+Mesh get_and_remove_staged_mesh(unsigned int id) {
+    Mesh m = {0};
+    for(int i=0; i<MAX_STAGED_MESHES; i++) {
+        if (staged_meshes[i].active && staged_meshes[i].id == id) {
+            m = staged_meshes[i].mesh;
+            staged_meshes[i].active = false;
+            printf("CONSUMED id=%u verts=%d slot=%d\n", id, m.vertexCount, i);
+            return m;
+        }
+    }
+    printf("NOT FOUND id=%u\n", id);
+    return m;
+}
 
 // Root structure holding all 6 face quadtrees
 typedef struct {
@@ -129,7 +220,7 @@ FrustumBounds compute_light_frustum_bounds(Vector3 corners[8], Vector3 lightDir,
 void cleanup_mesh_data(void *user_data);
 void *create_child_mesh_data(QuadTreeNode *parent, QuadTreeNode *child, void *parent_user_data);
 void *recreate_parent_mesh_data(QuadTreeNode *node);
-int draw_cubic_quadtree(CubicQuadTree *tree, Vector3 camera_pos, Material material);
+int draw_cubic_quadtree(CubicQuadTree *tree, Vector3 local_camera_pos, Material material, Matrix transform);
 
 // ===== Mesh Data Lifecycle =====
 
@@ -180,11 +271,16 @@ void *create_child_mesh_data(QuadTreeNode *parent, QuadTreeNode *child, void *pa
     default: return NULL;
   }
   
-  // Create mesh for this child
-  Mesh mesh = create_sphere_patch_mesh(parent_data->face, 
-                                        u_min, u_max, v_min, v_max,
-                                        PLANET_RADIUS, NOISE_SCALE,
-                                        chunk_resolution, SKIRT_DEPTH);
+  // RETRIEVE ASYNC MESH
+  unsigned int id = parent_data->pending_child_ids[index];
+  Mesh mesh = get_and_remove_staged_mesh(id);
+  
+  if (mesh.vertexCount == 0) {
+      // Synchronous fallback (e.g. initial load or error)
+      mesh = create_sphere_patch_mesh(parent_data->face, u_min, u_max, v_min, v_max,
+                                      PLANET_RADIUS, NOISE_SCALE,
+                                      chunk_resolution, SKIRT_DEPTH);
+  }
   
   CubicQuadTreeMeshData *child_data = malloc(sizeof(CubicQuadTreeMeshData));
   if (child_data == NULL) {
@@ -200,6 +296,9 @@ void *create_child_mesh_data(QuadTreeNode *parent, QuadTreeNode *child, void *pa
   child_data->v_max = v_max;
   child_data->center_elevation = get_center_elevation(parent_data->face, u_min, u_max, 
                                                        v_min, v_max, PLANET_RADIUS, NOISE_SCALE);
+  // Init async state
+  child_data->has_pending_split = false;
+  for(int i=0; i<4; i++) child_data->pending_child_ids[i] = 0;
   
   return child_data;
 }
@@ -212,7 +311,7 @@ void *recreate_parent_mesh_data(QuadTreeNode *node) {
 
 // ===== Drawing =====
 
-int draw_quadtree_meshes_recursive(QuadTreeNode *node, Material material) {
+int draw_quadtree_meshes_recursive(QuadTreeNode *node, Material material, Matrix transform) {
   if (node == NULL) return 0;
   
   // Check if leaf
@@ -227,12 +326,11 @@ int draw_quadtree_meshes_recursive(QuadTreeNode *node, Material material) {
   int count = 0;
   if (is_leaf && node->user_data != NULL) {
     CubicQuadTreeMeshData *mesh_data = (CubicQuadTreeMeshData *)node->user_data;
-    Matrix transform = MatrixIdentity();  // Meshes are already in world space
     DrawMesh(mesh_data->mesh, material, transform);
     count = mesh_data->mesh.vertexCount;
   } else {
     for (unsigned short i = 0; i < 4; i++) {
-      count += draw_quadtree_meshes_recursive(node->children[i], material);
+      count += draw_quadtree_meshes_recursive(node->children[i], material, transform);
     }
   }
   return count;
@@ -276,11 +374,11 @@ bool is_face_visible(CubeFace face, Vector3 camera_pos, float planet_radius) {
   return dot > -(sin_horizon + 0.71f);
 }
 
-int draw_cubic_quadtree(CubicQuadTree *tree, Vector3 camera_pos, Material material) {
+int draw_cubic_quadtree(CubicQuadTree *tree, Vector3 local_camera_pos, Material material, Matrix transform) {
   int total_vertices = 0;
   for (int i = 0; i < CUBE_FACE_COUNT; i++) {
-    if (tree->faces[i] != NULL && is_face_visible((CubeFace)i, camera_pos, tree->radius)) {
-      total_vertices += draw_quadtree_meshes_recursive(tree->faces[i], material);
+    if (tree->faces[i] != NULL && is_face_visible((CubeFace)i, local_camera_pos, tree->radius)) {
+      total_vertices += draw_quadtree_meshes_recursive(tree->faces[i], material, transform);
     }
   }
   return total_vertices;
@@ -326,6 +424,8 @@ float get_screen_space_size(float world_size, float distance, float fov_degrees,
   return (world_size / distance) * projection_factor;
 }
 
+static unsigned int global_req_id = 1;
+
 // Process single face quadtree for LOD based on screen-space error
 void process_face_lod(QuadTreeNode *node, Vector3 camera_pos, float camera_fov, int screen_height, int max_depth) {
   if (node == NULL) return;
@@ -354,7 +454,13 @@ void process_face_lod(QuadTreeNode *node, Vector3 camera_pos, float camera_fov, 
   }
   
   CubicQuadTreeMeshData *data = (CubicQuadTreeMeshData *)node->user_data;
-  
+
+  // Debug tracking
+  if (data->has_pending_split) g_pending_split_count++;
+  for (int i = 0; i < 4; i++) {
+      if (data->pending_child_ids[i] != 0) g_pending_ids_count++;
+  }
+
   float distance = get_chunk_distance(data, camera_pos);
   float chunk_size = get_chunk_world_size(data);
   
@@ -363,7 +469,128 @@ void process_face_lod(QuadTreeNode *node, Vector3 camera_pos, float camera_fov, 
   
   // Subdivide if chunk covers more than threshold pixels on screen OR if below min_depth
   if ((screen_pixels > SUBDIVIDE_PIXEL_THRESHOLD || node->depth < min_depth) && node->depth < max_depth) {
-    subdivide_quadtree_node(node, create_child_mesh_data, cleanup_mesh_data);
+      
+      // If not splitting yet, start the process
+      if (!data->has_pending_split) {
+          data->has_pending_split = true;
+          // Clean ensure IDs are 0
+          for(int i=0; i<4; i++) data->pending_child_ids[i] = 0;
+      }
+      
+      // Ensure all 4 requests are sent
+      float u_mid = (data->u_min + data->u_max) * 0.5f;
+      float v_mid = (data->v_min + data->v_max) * 0.5f;
+      bool all_sent = true;
+      
+      for(int i=0; i<4; i++) {
+          if (data->pending_child_ids[i] == 0) {
+              // Need to send this request
+              ChunkGenerationParams params = {
+                  .face = data->face,
+                  .radius = PLANET_RADIUS,
+                  .noise_scale = NOISE_SCALE,
+                  .resolution = chunk_resolution,
+                  .skirt_depth = SKIRT_DEPTH,
+                  .depth = node->depth + 1,
+                  .id = global_req_id  // Don't increment yet
+              };
+              
+              switch(i) {
+                  case 0: params.u_min = data->u_min; params.u_max = u_mid; params.v_min = data->v_min; params.v_max = v_mid; break;
+                  case 1: params.u_min = u_mid; params.u_max = data->u_max; params.v_min = data->v_min; params.v_max = v_mid; break;
+                  case 2: params.u_min = data->u_min; params.u_max = u_mid; params.v_min = v_mid; params.v_max = data->v_max; break;
+                  case 3: params.u_min = u_mid; params.u_max = data->u_max; params.v_min = v_mid; params.v_max = data->v_max; break;
+              }
+               Vector3 center = cube_face_to_sphere_point(params.face, 
+                            (params.u_min + params.u_max)*0.5f,
+                            (params.v_min + params.v_max)*0.5f, PLANET_RADIUS);
+               params.center_pos = center;
+               
+              if (async_loader_request(params)) {
+                  data->pending_child_ids[i] = params.id;
+                  global_req_id++;  // Only increment after successful enqueue
+                  g_requests_sent_this_frame++;
+              } else {
+                  // Queue full. Keep ID as 0 to retry next frame.
+                  all_sent = false;
+              }
+          }
+      }
+      
+      if (!all_sent) {
+          return; // Wait for next frame to try sending remaining requests
+      }
+      
+      // Check if all 4 children are ready in the staging area
+      bool all_ready = true;
+      for(int i=0; i<4; i++) {
+          bool found = false;
+          unsigned int needed_id = data->pending_child_ids[i];
+          
+          if (needed_id == 0) { 
+              // Should not happen if all_sent is true, but safety check
+              all_ready = false; 
+              break; 
+          }
+          
+          // Check staged meshes
+          for(int j=0; j<MAX_STAGED_MESHES; j++) {
+              if (staged_meshes[j].active && staged_meshes[j].id == needed_id) {
+                  found = true;
+                  
+                  // Check if it was a failed/skipped result
+                  if (staged_meshes[j].mesh.vertexCount == 0) {
+                      // Abort split.
+                       data->has_pending_split = false;
+                       get_and_remove_staged_mesh(needed_id);
+                       // Optimization: We could consume others if we found them, 
+                       // but looping again is safer to find all pending.
+                       all_ready = false;
+                       break;
+                  }
+                  break;
+              }
+          }
+          
+          if (!found) {
+               // Still waiting.
+               all_ready = false;
+               break;
+          }
+      }
+      
+      if (!all_ready && !data->has_pending_split) {
+           // We aborted inside the loop due to failure. Clean up others.
+           for(int i=0; i<4; i++) {
+               if (data->pending_child_ids[i] != 0) {
+                   get_and_remove_staged_mesh(data->pending_child_ids[i]); // Clean staging
+                   data->pending_child_ids[i] = 0;
+               }
+           }
+           return;
+      }
+      
+      if (all_ready) {
+          subdivide_quadtree_node(node, create_child_mesh_data, cleanup_mesh_data);
+          // Note: data (parent's user_data) has been freed by cleanup_mesh_data
+          // No need to clear state - the parent is no longer a leaf
+          return;  // Parent is no longer a leaf, don't touch freed data
+      }
+  } else {
+      // No longer need to subdivide - cancel any pending split
+      if (data->has_pending_split) {
+          g_splits_cancelled_this_frame++;
+          for (int i = 0; i < 4; i++) {
+              if (data->pending_child_ids[i] != 0) {
+                  // Try to remove from staged, but also mark as cancelled
+                  // in case it hasn't arrived yet
+                  get_and_remove_staged_mesh(data->pending_child_ids[i]);
+                  add_cancelled_id(data->pending_child_ids[i]);
+                  data->pending_child_ids[i] = 0;
+              }
+          }
+          data->has_pending_split = false;
+      }
   }
 }
 
@@ -426,45 +653,111 @@ void merge_face_lod(QuadTreeNode *node, Vector3 camera_pos, float camera_fov, in
   float u_min = first_child->u_min;
   float v_min = first_child->v_min;
   
-  // Find the actual bounds from all children
-  for (unsigned short i = 0; i < 4; i++) {
-    CubicQuadTreeMeshData *cd = (CubicQuadTreeMeshData *)node->children[i]->user_data;
-    if (cd == NULL) continue;  // Safety check
-    if (cd->u_min < u_min) u_min = cd->u_min;
-    if (cd->v_min < v_min) v_min = cd->v_min;
-  }
+  // Find the actual bounds from all children (assuming standard quadrant layout)
+  // Or just reconstruct from known child 0 (it is always u_min, v_min relative to parent?)
+  // Children layout:
+  // 0: u_min, v_min
+  // 1: u_mid, v_min
+  // 2: u_min, v_mid
+  // 3: u_mid, v_mid
+  // So child 0's min is parent's min.
+  // We can verify this but for this specific tree structure it's consistent.
+  
   float u_max = u_min + u_size * 2;
   float v_max = v_min + v_size * 2;
-  
-  // Clean up children
-  for (unsigned short i = 0; i < 4; i++) {
-    cleanup_mesh_data(node->children[i]->user_data);
-    free(node->children[i]);
-    node->children[i] = NULL;
-  }
-  
-  // Recreate parent mesh
-  CubicQuadTreeMeshData *parent_data = malloc(sizeof(CubicQuadTreeMeshData));
-  if (parent_data) {
-    parent_data->face = face;
-    parent_data->u_min = u_min;
-    parent_data->u_max = u_max;
-    parent_data->v_min = v_min;
-    parent_data->v_max = v_max;
-    parent_data->mesh = create_sphere_patch_mesh(face, u_min, u_max, v_min, v_max,
-                                                  PLANET_RADIUS, NOISE_SCALE, chunk_resolution, SKIRT_DEPTH);
-    parent_data->center_elevation = get_center_elevation(face, u_min, u_max, v_min, v_max,
-                                                          PLANET_RADIUS, NOISE_SCALE);
-    node->user_data = parent_data;
+
+  // ASYNC MERGE
+  // We attach the pending request ID to the first child for tracking
+  if (first_child->pending_merge_id == 0) {
+      // Request generation of the parent mesh (lower resolution relative to world size, but same grid res)
+      ChunkGenerationParams params = {
+          .face = face,
+          .radius = PLANET_RADIUS,
+          .noise_scale = NOISE_SCALE,
+          .resolution = chunk_resolution,
+          .skirt_depth = SKIRT_DEPTH,
+          .u_min = u_min, .u_max = u_max,
+          .v_min = v_min, .v_max = v_max,
+          .depth = node->depth, // Parent depth
+          .center_pos = cube_face_to_sphere_point(face,
+                                (u_min + u_max)*0.5f,
+                                (v_min + v_max)*0.5f, PLANET_RADIUS),
+          .id = global_req_id  // Don't increment yet
+      };
+
+      if (async_loader_request(params)) {
+          first_child->pending_merge_id = params.id;
+          global_req_id++;  // Only increment after successful enqueue
+      }
+      // If queue full, pending_merge_id stays 0, will retry next frame
+  } else {
+      // Check if result is ready
+      Mesh parent_mesh = {0};
+      bool found = false;
+      unsigned int needed_id = first_child->pending_merge_id;
+      
+      // Check staged meshes
+      for(int j=0; j<MAX_STAGED_MESHES; j++) {
+          if (staged_meshes[j].active && staged_meshes[j].id == needed_id) {
+              if (staged_meshes[j].mesh.vertexCount > 0) {
+                  parent_mesh = staged_meshes[j].mesh;
+                  found = true;
+              } else {
+                  // Failed generation (invalid). Reset.
+                  first_child->pending_merge_id = 0;
+                  get_and_remove_staged_mesh(needed_id);
+                  return; // Try again next frame
+              }
+              // Mark as consumed (will be removed below)
+              staged_meshes[j].active = false; 
+              break;
+          }
+      }
+      
+       if (!found) {
+           // If not pending/staged, it was dropped/lost. Reset.
+           if (!async_loader_is_pending(needed_id)) {
+               first_child->pending_merge_id = 0; 
+           }
+           return; // Still waiting
+       }
+      
+      // Merge is ready!
+      // Clean up children
+      for (unsigned short i = 0; i < 4; i++) {
+        cleanup_mesh_data(node->children[i]->user_data);
+        free(node->children[i]);
+        node->children[i] = NULL;
+      }
+      
+      // Assign parent mesh
+      CubicQuadTreeMeshData *parent_data = malloc(sizeof(CubicQuadTreeMeshData));
+      if (parent_data) {
+        parent_data->face = face;
+        parent_data->u_min = u_min;
+        parent_data->u_max = u_max;
+        parent_data->v_min = v_min;
+        parent_data->v_max = v_max;
+        parent_data->mesh = parent_mesh;
+        parent_data->center_elevation = get_center_elevation(face, u_min, u_max, v_min, v_max,
+                                                              PLANET_RADIUS, NOISE_SCALE);
+        parent_data->has_pending_split = false;
+        for(int i=0; i<4; i++) parent_data->pending_child_ids[i] = 0;
+        parent_data->pending_merge_id = 0; // Clear
+        
+        node->user_data = parent_data;
+      } else {
+           UnloadMesh(parent_mesh); // Safety
+      }
   }
 }
 
 // Process all faces for LOD (only visible faces)
-void process_cubic_quadtree_lod(CubicQuadTree *tree, Vector3 camera_pos, float camera_fov, int screen_height, int max_depth) {
+void process_cubic_quadtree_lod(CubicQuadTree *tree, Vector3 local_camera_pos, float camera_fov, int screen_height, int max_depth) {
   for (int i = 0; i < CUBE_FACE_COUNT; i++) {
-    if (tree->faces[i] != NULL && is_face_visible((CubeFace)i, camera_pos, tree->radius)) {
-      process_face_lod(tree->faces[i], camera_pos, camera_fov, screen_height, max_depth);
-      merge_face_lod(tree->faces[i], camera_pos, camera_fov, screen_height);
+    if (tree->faces[i] != NULL && is_face_visible((CubeFace)i, local_camera_pos, tree->radius)) {
+      process_face_lod(tree->faces[i], local_camera_pos, camera_fov, screen_height, max_depth);
+      merge_face_lod(tree->faces[i], local_camera_pos, camera_fov, screen_height);
     }
   }
 }
@@ -542,6 +835,9 @@ int main(void) {
   InitWindow(screenWidth, screenHeight, "Cubic Quadtree Planet - Shadows");
   SetTargetFPS(60);
   ToggleBorderlessWindowed();
+  
+  // Initialize Async Loader
+  async_loader_init();
   
   // Create cubic quadtree (single face for testing)
   CubicQuadTree *planet = create_cubic_quadtree(PLANET_RADIUS, NOISE_SCALE);
@@ -735,10 +1031,57 @@ int main(void) {
     if (IsKeyPressed(KEY_EQUAL)) min_depth = (min_depth < MAX_DEPTH) ? min_depth + 1 : MAX_DEPTH;
     if (IsKeyPressed(KEY_MINUS)) min_depth = (min_depth > 0) ? min_depth - 1 : 0;
     
+    // Input: Rotation speed
+    if (IsKeyDown(KEY_COMMA)) planet_rotation_speed -= 10.0f * deltaTime;
+    if (IsKeyDown(KEY_PERIOD)) planet_rotation_speed += 10.0f * deltaTime;
+    
+    // Update Rotation
+    planet_rotation_angle += planet_rotation_speed * deltaTime;
+    Matrix planet_transform = MatrixRotateY(planet_rotation_angle * DEG2RAD);
+    Matrix planet_transform_inv = MatrixInvert(planet_transform);
+    
+    // Calculate local_camera_pos for LOD and Culling
+    Vector3 local_camera_pos = Vector3Transform(camera.position, planet_transform_inv);
+
+    t_lod_start = GetTime();
+
+    // --- ASYNC PROCESSING ---
+    async_loader_update_state(local_camera_pos, SUBDIVIDE_PIXEL_THRESHOLD, screenHeight, camera.fovy);
+
+    // Poll results
+    ChunkGenerationResult res;
+    while(async_loader_get_result(&res)) {
+        // Check if this result was cancelled
+        if (is_cancelled_id(res.id)) {
+            remove_cancelled_id(res.id);
+            if (res.valid) {
+                free_cpu_mesh(&res.mesh);  // Discard the CPU mesh data
+            }
+            printf("DISCARDED cancelled id=%u\n", res.id);
+            continue;
+        }
+
+        if (res.valid) {
+            Mesh m = upload_mesh_gpu(res.mesh); // Upload to VRAM
+            // Note: upload_mesh_gpu transfers ownership of pointers to m.vertices etc.
+            // DO NOT call free_cpu_mesh(&res.mesh) here!
+            add_staged_mesh(res.id, m);
+        } else {
+             // Invalid/skipped.
+             // Stage an empty mesh so we know the request 'completed' (but failed/skipped)
+             Mesh empty = {0};
+             add_staged_mesh(res.id, empty);
+        }
+    }
+
     // LOD processing
     t_lod_start = GetTime();
+    g_pending_split_count = 0;
+    g_pending_ids_count = 0;
+    g_requests_sent_this_frame = 0;
+    g_splits_cancelled_this_frame = 0;
     if (enable_lod) {
-      process_cubic_quadtree_lod(planet, camera.position, camera.fovy, GetScreenHeight(), MAX_DEPTH);
+      process_cubic_quadtree_lod(planet, local_camera_pos, camera.fovy, GetScreenHeight(), MAX_DEPTH);
     }
     t_lod_end = GetTime();
     
@@ -826,7 +1169,7 @@ int main(void) {
         lightProjs[i] = rlGetMatrixProjection();
       }
       
-      draw_cubic_quadtree(planet, camera.position, shadowMaterial);
+      draw_cubic_quadtree(planet, local_camera_pos, shadowMaterial, planet_transform);
       
       EndMode3D();
       EndTextureMode();
@@ -859,10 +1202,10 @@ int main(void) {
     t_render_start = GetTime();
     int vertexCount = 0;
     if (enable_lighting) {
-      vertexCount = draw_cubic_quadtree(planet, camera.position, shadowMaterial);
+      vertexCount = draw_cubic_quadtree(planet, local_camera_pos, shadowMaterial, planet_transform);
     } else {
       Material unlitMat = LoadMaterialDefault();
-      vertexCount = draw_cubic_quadtree(planet, camera.position, unlitMat);
+      vertexCount = draw_cubic_quadtree(planet, local_camera_pos, unlitMat, planet_transform);
     }
     
     EndMode3D();
@@ -884,26 +1227,42 @@ int main(void) {
              camera.position.x, camera.position.y, camera.position.z), 10, 160, 20, GRAY);
 
     DrawText(TextFormat("[ / ]: Chunk Res (%d) | - / =: Min Depth (%d)", chunk_resolution, min_depth), 10, 185, 20, YELLOW);
+    DrawText(TextFormat("< / >: Rotation Speed (%.1f deg/s)", planet_rotation_speed), 10, 210, 20, YELLOW);
     
     // Draw profiling info
     double lod_ms = (t_lod_end - t_lod_start) * 1000.0;
     double shadow_ms = (t_shadows_end - t_shadows_start) * 1000.0;
     double render_ms = (t_render_end - t_render_start) * 1000.0;
     
-    DrawText(TextFormat("LOD Update: %.2f ms", lod_ms), 10, 200, 20, GREEN);
-    DrawText(TextFormat("Shadow Maps: %.2f ms", shadow_ms), 10, 230, 20, GREEN);
-    DrawText(TextFormat("Main Render: %.2f ms", render_ms), 10, 260, 20, GREEN);
-    DrawText(TextFormat("Total CPU Work: %.2f ms", lod_ms + shadow_ms + render_ms), 10, 290, 20, GREEN);
-    DrawText(TextFormat("Active Vertices: %d", vertexCount), 10, 320, 20, GREEN);
-    
+    DrawText(TextFormat("LOD Update: %.2f ms", lod_ms), 10, 230, 20, GREEN);
+    DrawText(TextFormat("Shadow Maps: %.2f ms", shadow_ms), 10, 260, 20, GREEN);
+    DrawText(TextFormat("Main Render: %.2f ms", render_ms), 10, 290, 20, GREEN);
+    DrawText(TextFormat("Total CPU Work: %.2f ms", lod_ms + shadow_ms + render_ms), 10, 320, 20, GREEN);
+    DrawText(TextFormat("Active Vertices: %d", vertexCount), 10, 350, 20, GREEN);
 
-    
+    // Async loader debug stats
+    AsyncLoaderStats async_stats;
+    async_loader_get_stats(&async_stats);
+    DrawText(TextFormat("Async: Req Q: %d | Result Q: %d | Staged: %d",
+             async_stats.request_queue_count, async_stats.result_queue_count, get_staged_mesh_count()),
+             10, 380, 20, ORANGE);
+    DrawText(TextFormat("Async Total: Processed: %d | Skipped: %d | Next ID: %u",
+             async_stats.total_processed, async_stats.total_skipped, global_req_id),
+             10, 410, 20, ORANGE);
+    DrawText(TextFormat("Worker: loops=%d waiting=%d",
+             async_stats.worker_loop_count, async_stats.worker_waiting),
+             10, 440, 20, async_stats.worker_waiting ? RED : LIME);
+    DrawText(TextFormat("Pending: splits=%d child_ids=%d | Sent: %d | Cancelled: %d",
+             g_pending_split_count, g_pending_ids_count, g_requests_sent_this_frame, g_splits_cancelled_this_frame),
+             10, 470, 20, SKYBLUE);
+
     DrawFPS(screenWidth - 100, 10);
     
     EndDrawing();
   }
   
   // Cleanup
+  async_loader_shutdown();
   for (unsigned short i = 0; i < CASCADE_COUNT; i++) {
     UnloadRenderTexture(shadowMaps[i]);
   }
