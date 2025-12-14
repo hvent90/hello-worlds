@@ -19,14 +19,14 @@
 const float PLANET_RADIUS = 1700000.0f;  // 1000 km
 const float NOISE_SCALE = 3000.0f;       // Height variation in meters
 const float SKIRT_DEPTH = 4000.0f;        // Skirt depth to hide seams (must be > NOISE_SCALE)
-#define MAX_DEPTH 8
+#define MAX_DEPTH 14
 
 // Tweakable parameters
 int chunk_resolution = 32;
 int min_depth = 0;
 
 // Planet rotation state
-float planet_rotation_speed = 5.0f; // Degrees per second
+float planet_rotation_speed = 0.0f; // Degrees per second
 float planet_rotation_angle = 0.0f;
 
 // Forward declare MeshRequest for the struct
@@ -349,15 +349,26 @@ int draw_cubic_quadtree(CubicQuadTree *tree, Vector3 local_camera_pos, Material 
 const float SUBDIVIDE_PIXEL_THRESHOLD = 4000.0f;  // Subdivide when chunk covers more than this many pixels
 const float MERGE_PIXEL_THRESHOLD = 1900.0f;      // Merge when chunk covers less than this many pixels (must be < SUBDIVIDE / 2)
 
-// Check distance from camera to chunk center (on sphere surface)
+// Check distance from camera to closest point on chunk (samples corners + center)
 float get_chunk_distance(CubicQuadTreeMeshData *data, Vector3 camera_pos) {
-  float u_center = (data->u_min + data->u_max) * 0.5f;
-  float v_center = (data->v_min + data->v_max) * 0.5f;
-  
-  // Use PLANET_RADIUS directly - center_elevation includes noise which makes it unreliable
-  Vector3 chunk_center = cube_face_to_sphere_point(data->face, u_center, v_center, PLANET_RADIUS);
-  
-  return Vector3Distance(camera_pos, chunk_center);
+  // Sample 5 points: 4 corners + center
+  float u_vals[3] = { data->u_min, (data->u_min + data->u_max) * 0.5f, data->u_max };
+  float v_vals[3] = { data->v_min, (data->v_min + data->v_max) * 0.5f, data->v_max };
+
+  float min_dist = FLT_MAX;
+
+  // Check corners (0,0), (0,2), (2,0), (2,2) and center (1,1)
+  int samples[5][2] = { {0,0}, {0,2}, {2,0}, {2,2}, {1,1} };
+
+  for (int i = 0; i < 5; i++) {
+    float u = u_vals[samples[i][0]];
+    float v = v_vals[samples[i][1]];
+    Vector3 point = cube_face_to_sphere_point(data->face, u, v, PLANET_RADIUS);
+    float dist = Vector3Distance(camera_pos, point);
+    if (dist < min_dist) min_dist = dist;
+  }
+
+  return min_dist;
 }
 
 // Get approximate world-space size of a chunk
@@ -908,7 +919,12 @@ int main(void) {
     // Input: Min Depth control with - and =
     if (IsKeyPressed(KEY_EQUAL)) min_depth = (min_depth < MAX_DEPTH) ? min_depth + 1 : MAX_DEPTH;
     if (IsKeyPressed(KEY_MINUS)) min_depth = (min_depth > 0) ? min_depth - 1 : 0;
-    
+
+    // Input: Zoom (FOV) control with Z/X
+    const float zoomSpeed = 30.0f;
+    if (IsKeyDown(KEY_Z)) camera.fovy = fmaxf(10.0f, camera.fovy - zoomSpeed * deltaTime);
+    if (IsKeyDown(KEY_X)) camera.fovy = fminf(90.0f, camera.fovy + zoomSpeed * deltaTime);
+
     // Input: Rotation speed
     if (IsKeyDown(KEY_COMMA)) planet_rotation_speed -= 10.0f * deltaTime;
     if (IsKeyDown(KEY_PERIOD)) planet_rotation_speed += 10.0f * deltaTime;
@@ -1068,7 +1084,7 @@ int main(void) {
     t_shadows_end = GetTime();
     
     // ===== PASS 2: Render main scene with shadows =====
-    rlSetClipPlanes(100.0f, 10000000.0f);  // 100m to 10,000km
+    rlSetClipPlanes(10.0f, 10000000.0f);  // 100m to 10,000km
     
     BeginDrawing();
     ClearBackground(BLACK);
@@ -1117,29 +1133,30 @@ int main(void) {
 
     DrawText(TextFormat("[ / ]: Chunk Res (%d) | - / =: Min Depth (%d)", chunk_resolution, min_depth), 10, 185, 20, YELLOW);
     DrawText(TextFormat("< / >: Rotation Speed (%.1f deg/s)", planet_rotation_speed), 10, 210, 20, YELLOW);
+    DrawText(TextFormat("Z / X: Zoom (FOV %.1f)", camera.fovy), 10, 235, 20, YELLOW);
     
     // Draw profiling info
     double lod_ms = (t_lod_end - t_lod_start) * 1000.0;
     double shadow_ms = (t_shadows_end - t_shadows_start) * 1000.0;
     double render_ms = (t_render_end - t_render_start) * 1000.0;
     
-    DrawText(TextFormat("LOD Update: %.2f ms", lod_ms), 10, 230, 20, GREEN);
-    DrawText(TextFormat("Shadow Maps: %.2f ms", shadow_ms), 10, 260, 20, GREEN);
-    DrawText(TextFormat("Main Render: %.2f ms", render_ms), 10, 290, 20, GREEN);
-    DrawText(TextFormat("Total CPU Work: %.2f ms", lod_ms + shadow_ms + render_ms), 10, 320, 20, GREEN);
-    DrawText(TextFormat("Active Vertices: %d", vertexCount), 10, 350, 20, GREEN);
+    DrawText(TextFormat("LOD Update: %.2f ms", lod_ms), 10, 255, 20, GREEN);
+    DrawText(TextFormat("Shadow Maps: %.2f ms", shadow_ms), 10, 285, 20, GREEN);
+    DrawText(TextFormat("Main Render: %.2f ms", render_ms), 10, 315, 20, GREEN);
+    DrawText(TextFormat("Total CPU Work: %.2f ms", lod_ms + shadow_ms + render_ms), 10, 345, 20, GREEN);
+    DrawText(TextFormat("Active Vertices: %d", vertexCount), 10, 375, 20, GREEN);
 
     // Mesh thread pool debug stats
     MeshPoolStats pool_stats = mesh_pool_get_stats(&g_mesh_pool);
     DrawText(TextFormat("Pool: Queued: %d | Completed: %d | Threads: %d",
              pool_stats.queued_count, pool_stats.completed_count, pool_stats.thread_count),
-             10, 380, 20, ORANGE);
+             10, 405, 20, ORANGE);
     DrawText(TextFormat("Frame: Sent: %d | Processed: %d | Cancelled: %d",
              g_requests_sent_this_frame, g_results_processed_this_frame, g_splits_cancelled_this_frame),
-             10, 410, 20, ORANGE);
+             10, 435, 20, ORANGE);
     DrawText(TextFormat("Pending: splits=%d requests=%d",
              g_pending_split_count, g_pending_requests_count),
-             10, 440, 20, SKYBLUE);
+             10, 465, 20, SKYBLUE);
 
     DrawFPS(screenWidth - 100, 10);
     
