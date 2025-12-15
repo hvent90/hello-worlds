@@ -1,7 +1,18 @@
+// Windows includes must come BEFORE raylib to avoid symbol conflicts
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOGDI
+#define NOUSER
+#include <windows.h>
+#endif
+
 #include "mesh_thread_pool.h"
 #include <stdlib.h>
 #include <stdio.h>
+
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 
 // Worker thread function
 static void* worker_thread(void* arg) {
@@ -86,8 +97,14 @@ static void* worker_thread(void* arg) {
 
 // Get number of CPU cores
 static int get_cpu_count(void) {
+#ifdef _WIN32
+    SYSTEM_INFO sysinfo;
+    GetSystemInfo(&sysinfo);
+    return (int)sysinfo.dwNumberOfProcessors;
+#else
     long count = sysconf(_SC_NPROCESSORS_ONLN);
     return (count > 0) ? (int)count : 4;  // Default to 4 if detection fails
+#endif
 }
 
 bool mesh_pool_init(MeshThreadPool* pool) {

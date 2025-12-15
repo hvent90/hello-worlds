@@ -2,6 +2,7 @@
 #define MESH_THREAD_POOL_H
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdatomic.h>
 #include <pthread.h>
 #include "mesh.h"
