@@ -22,8 +22,15 @@ typedef enum {
     REQUEST_MERGE         // Regenerating parent mesh
 } MeshRequestType;
 
+// Magic number to detect use-after-free
+#define MESH_REQUEST_MAGIC 0xDEADBEEF
+#define MESH_REQUEST_FREED 0xFEEDFACE
+
 // Self-contained mesh generation request
 typedef struct MeshRequest {
+    // Magic number for validity checking
+    uint32_t magic;
+
     // Request type
     MeshRequestType type;
 

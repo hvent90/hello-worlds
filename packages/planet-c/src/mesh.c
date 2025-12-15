@@ -729,6 +729,7 @@ Mesh upload_mesh_gpu(CpuMesh cpu_mesh) {
 }
 
 void free_cpu_mesh(CpuMesh *cpu_mesh) {
+  if (cpu_mesh == NULL) return;
   if (cpu_mesh->vertices) free(cpu_mesh->vertices);
   if (cpu_mesh->normals) free(cpu_mesh->normals);
   if (cpu_mesh->indices) free(cpu_mesh->indices);

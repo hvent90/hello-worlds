@@ -74,14 +74,13 @@ static void* worker_thread(void* arg) {
             request->resolution, request->skirt_depth
         );
 
-        // Check if cancelled during generation
-        status = atomic_load(&request->status);
-        if (status == REQUEST_CANCELLED) {
+        // Atomically set status to READY only if still GENERATING
+        // This prevents a race where main thread cancels between our check and store
+        MeshRequestStatus expected = REQUEST_GENERATING;
+        if (!atomic_compare_exchange_strong(&request->status, &expected, REQUEST_READY)) {
+            // CAS failed - status was changed (to CANCELLED) by main thread
             // Free the generated mesh since we won't use it
             free_cpu_mesh(&request->result);
-        } else {
-            // Mark as ready
-            atomic_store(&request->status, REQUEST_READY);
         }
 
         // Move to completed list
@@ -237,6 +236,7 @@ MeshRequest* mesh_pool_enqueue(MeshThreadPool* pool,
     }
 
     // Initialize request
+    request->magic = MESH_REQUEST_MAGIC;
     request->type = type;
     request->face = face;
     request->u_min = u_min;
@@ -307,6 +307,17 @@ void mesh_pool_cancel(MeshRequest* request) {
 
 void mesh_pool_free_request(MeshRequest* request) {
     if (request != NULL) {
+        // Check for double-free
+        if (request->magic == MESH_REQUEST_FREED) {
+            fprintf(stderr, "ERROR: Double-free of MeshRequest %p\n", (void*)request);
+            return;
+        }
+        if (request->magic != MESH_REQUEST_MAGIC) {
+            fprintf(stderr, "ERROR: Freeing invalid MeshRequest %p (magic=%08X)\n",
+                    (void*)request, request->magic);
+        }
+        // Mark as freed before actually freeing
+        request->magic = MESH_REQUEST_FREED;
         // Note: CpuMesh should already be freed or uploaded
         // We don't free it here to avoid double-free
         free(request);

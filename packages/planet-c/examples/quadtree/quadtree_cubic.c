@@ -50,6 +50,37 @@ typedef struct {
 static MeshThreadPool g_mesh_pool;
 static uint32_t g_generation_counter = 1;
 
+// ===== Mesh Data Validity Registry =====
+// Tracks which mesh_data pointers are currently valid to prevent dereferencing freed memory
+#define MESH_REGISTRY_SIZE 4096
+static void* g_valid_mesh_data[MESH_REGISTRY_SIZE];
+static int g_valid_mesh_count = 0;
+
+static void registry_add(void* ptr) {
+  if (g_valid_mesh_count < MESH_REGISTRY_SIZE) {
+    g_valid_mesh_data[g_valid_mesh_count++] = ptr;
+  }
+}
+
+static void registry_remove(void* ptr) {
+  for (int i = 0; i < g_valid_mesh_count; i++) {
+    if (g_valid_mesh_data[i] == ptr) {
+      // Swap with last and decrement count
+      g_valid_mesh_data[i] = g_valid_mesh_data[--g_valid_mesh_count];
+      return;
+    }
+  }
+}
+
+static bool registry_contains(void* ptr) {
+  for (int i = 0; i < g_valid_mesh_count; i++) {
+    if (g_valid_mesh_data[i] == ptr) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Debug counters
 static int g_pending_split_count = 0;
 static int g_pending_requests_count = 0;
@@ -164,6 +195,7 @@ void cleanup_mesh_data(void *user_data) {
   // Cancel any pending subdivision requests
   for (int i = 0; i < 4; i++) {
     if (mesh_data->pending_child[i] != NULL) {
+      mesh_data->pending_child[i]->node = NULL;  // Null out before cancel to prevent dangling access
       mesh_pool_cancel(mesh_data->pending_child[i]);
       mesh_data->pending_child[i] = NULL;
     }
@@ -171,9 +203,13 @@ void cleanup_mesh_data(void *user_data) {
 
   // Cancel any pending merge request
   if (mesh_data->pending_merge != NULL) {
+    mesh_data->pending_merge->node = NULL;  // Null out before cancel to prevent dangling access
     mesh_pool_cancel(mesh_data->pending_merge);
     mesh_data->pending_merge = NULL;
   }
+
+  // Remove from validity registry BEFORE freeing
+  registry_remove(mesh_data);
 
   UnloadMesh(mesh_data->mesh);
   free(mesh_data);
@@ -243,6 +279,7 @@ void *create_child_mesh_data(QuadTreeNode *parent, QuadTreeNode *child, void *pa
     UnloadMesh(mesh);
     return NULL;
   }
+  registry_add(child_data);  // Track as valid
 
   child_data->mesh = mesh;
   child_data->face = parent_data->face;
@@ -505,6 +542,7 @@ void process_face_lod(QuadTreeNode *node, Vector3 camera_pos, float camera_fov, 
       g_splits_cancelled_this_frame++;
       for (int i = 0; i < 4; i++) {
         if (data->pending_child[i] != NULL) {
+          data->pending_child[i]->node = NULL;  // Null out before cancel to prevent dangling access
           mesh_pool_cancel(data->pending_child[i]);
           // Don't free here - will be freed when drained from completed list
           data->pending_child[i] = NULL;
@@ -609,6 +647,7 @@ void merge_face_lod(QuadTreeNode *node, Vector3 camera_pos, float camera_fov, in
       // Assign parent mesh
       CubicQuadTreeMeshData *parent_data = malloc(sizeof(CubicQuadTreeMeshData));
       if (parent_data) {
+        registry_add(parent_data);  // Track as valid
         parent_data->face = face;
         parent_data->u_min = u_min;
         parent_data->u_max = u_max;
@@ -681,7 +720,8 @@ CubicQuadTree *create_cubic_quadtree(float radius, float noise_scale) {
       free(tree);
       return NULL;
     }
-    
+    registry_add(root_data);  // Track as valid
+
     root_data->face = (CubeFace)face;
     root_data->u_min = -1.0f;
     root_data->u_max = 1.0f;
@@ -940,41 +980,64 @@ int main(void) {
     t_lod_start = GetTime();
 
     // --- ASYNC PROCESSING ---
-    // Drain completed requests and free cancelled ones
+    // Drain completed requests and free orphaned/cancelled ones
     g_results_processed_this_frame = 0;
     MeshRequest *completed = mesh_pool_drain_completed(&g_mesh_pool);
     while (completed != NULL) {
+      // Check for use-after-free
+      if (completed->magic == MESH_REQUEST_FREED) {
+        fprintf(stderr, "ERROR: Accessing freed MeshRequest %p in drain loop\n", (void*)completed);
+        break;  // Stop processing to avoid further corruption
+      }
+      if (completed->magic != MESH_REQUEST_MAGIC) {
+        fprintf(stderr, "ERROR: Invalid MeshRequest %p in drain loop (magic=%08X)\n",
+                (void*)completed, completed->magic);
+        break;
+      }
+
       MeshRequest *next = completed->next;
       MeshRequestStatus status = atomic_load(&completed->status);
 
+      // Handle based on request status
       if (status == REQUEST_CANCELLED) {
-        // Cancelled - free CPU mesh if generated
+        // CANCELLED requests are safe to free - their mesh was already freed by worker
+        // (if CAS failed) or was never generated (if cancelled before processing)
         if (completed->result.vertices != NULL) {
           free_cpu_mesh(&completed->result);
         }
-      }
-      // For READY requests, the mesh stays in the request
-      // until create_child_mesh_data or merge_face_lod consumes it
+        mesh_pool_free_request(completed);
+      } else if (status == REQUEST_READY) {
+        // READY requests need careful handling - check if still referenced
+        CubicQuadTreeMeshData *node_data = (CubicQuadTreeMeshData *)completed->node;
+        bool can_free = false;
 
-      // Only free if no node is holding a reference
-      // Check if the request is still referenced by a node
-      CubicQuadTreeMeshData *node_data = (CubicQuadTreeMeshData *)completed->node;
-      bool still_referenced = false;
+        // Only check reference if node is valid (in registry)
+        if (node_data == NULL) {
+          // Node was nulled by cancellation - safe to free
+          can_free = true;
+        } else if (registry_contains(node_data) &&
+                   node_data->generation == completed->node_generation) {
+          // Node is valid - check if it still points to this request
+          bool still_referenced = false;
+          if (completed->child_index >= 0 && completed->child_index < 4) {
+            still_referenced = (node_data->pending_child[completed->child_index] == completed);
+          } else if (completed->child_index == -1) {
+            still_referenced = (node_data->pending_merge == completed);
+          }
+          // Only free if not referenced (orphaned)
+          can_free = !still_referenced;
+        }
+        // else: node is invalid/freed but not NULL - can't safely determine reference
+        //       DON'T free to avoid double-free (safer to leak than crash)
 
-      if (node_data != NULL && node_data->generation == completed->node_generation) {
-        // Node is still valid - check if it still points to this request
-        if (completed->child_index >= 0 && completed->child_index < 4) {
-          still_referenced = (node_data->pending_child[completed->child_index] == completed);
-        } else if (completed->child_index == -1) {
-          still_referenced = (node_data->pending_merge == completed);
+        if (can_free) {
+          if (completed->result.vertices != NULL) {
+            free_cpu_mesh(&completed->result);
+          }
+          mesh_pool_free_request(completed);
         }
       }
-
-      if (!still_referenced && status == REQUEST_CANCELLED) {
-        // Not referenced and cancelled - safe to free
-        mesh_pool_free_request(completed);
-      }
-      // If still referenced, leave it for LOD processing to handle
+      // Other statuses (QUEUED, GENERATING) shouldn't appear in completed queue
 
       g_results_processed_this_frame++;
       completed = next;
