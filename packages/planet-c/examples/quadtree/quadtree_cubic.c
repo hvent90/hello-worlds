@@ -787,6 +787,7 @@ int main(void) {
   int enable_wireframe = false;
   int enable_lod = true;
   int enable_lighting = true;
+  int enable_procedural_normals = true;  // GPU-side per-pixel normals
   
   DisableCursor();
   
@@ -857,6 +858,17 @@ int main(void) {
   int debugCascadesLoc = GetShaderLocation(shadowShader, "debugCascades");
   int debugCascades = 0;
   SetShaderValue(shadowShader, debugCascadesLoc, &debugCascades, SHADER_UNIFORM_INT);
+
+  // Planet noise parameters for GPU-side normal computation
+  int planetRadiusLoc = GetShaderLocation(shadowShader, "planetRadius");
+  int noiseScaleLoc = GetShaderLocation(shadowShader, "noiseScale");
+  int useProceduralNormalsLoc = GetShaderLocation(shadowShader, "useProceduralNormals");
+  int noiseOctavesLoc = GetShaderLocation(shadowShader, "noiseOctaves");
+
+  SetShaderValue(shadowShader, planetRadiusLoc, &PLANET_RADIUS, SHADER_UNIFORM_FLOAT);
+  SetShaderValue(shadowShader, noiseScaleLoc, &NOISE_SCALE, SHADER_UNIFORM_FLOAT);
+  int noiseOctaves = 6;  // Match CPU octaves
+  SetShaderValue(shadowShader, noiseOctavesLoc, &noiseOctaves, SHADER_UNIFORM_INT);
   
   // Store light matrices
   Matrix lightViews[CASCADE_COUNT] = {0};
@@ -926,6 +938,12 @@ int main(void) {
     if (IsKeyPressed(KEY_G)) {
       enable_lighting = !enable_lighting;
     }
+
+    // Input: Procedural normals toggle
+    if (IsKeyPressed(KEY_N)) {
+      enable_procedural_normals = !enable_procedural_normals;
+    }
+    SetShaderValue(shadowShader, useProceduralNormalsLoc, &enable_procedural_normals, SHADER_UNIFORM_INT);
     
     // Input: Light direction (arrow keys)
     const float lightRotateSpeed = 60.0f;
@@ -1182,12 +1200,13 @@ int main(void) {
     // UI
     DrawText("Cubic Quadtree Planet - Shadows", 10, 10, 20, WHITE);
     DrawText("WASD: Move | Mouse: Look | Shift: Speed", 10, 40, 20, WHITE);
-    DrawText("Arrows: Move Light | F: Wireframe | L: LOD | C: Debug | G: Lighting", 10, 70, 20, WHITE);
-    DrawText(TextFormat("F: Wireframe %s | L: LOD %s | C: Debug %s | G: Lighting %s", 
+    DrawText("Arrows: Move Light | F: Wireframe | L: LOD | C: Debug | G: Lighting | N: ProceduralNormals", 10, 70, 20, WHITE);
+    DrawText(TextFormat("F: Wire %s | L: LOD %s | C: Debug %s | G: Light %s | N: ProcNorm %s",
              enable_wireframe ? "ON" : "OFF",
              enable_lod ? "ON" : "OFF",
              debugCascades ? "ON" : "OFF",
-             enable_lighting ? "ON" : "OFF"), 10, 100, 20, WHITE);
+             enable_lighting ? "ON" : "OFF",
+             enable_procedural_normals ? "ON" : "OFF"), 10, 100, 20, WHITE);
     
     float altitude = Vector3Length(camera.position) - PLANET_RADIUS;
     DrawText(TextFormat("Altitude: %.1f km", altitude / 1000.0f), 10, 130, 20, YELLOW);
