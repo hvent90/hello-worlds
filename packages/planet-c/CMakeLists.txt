@@ -72,21 +72,32 @@ add_executable(quadtree_cubic
   src/cube_face.c
   src/mesh_thread_pool.c)
 
+add_executable(quadtree_moon
+  examples/quadtree/quadtree_moon.c
+  src/camera.c
+  src/shadow.c
+  src/quadtree.c
+  src/moon_mesh.c
+  src/cube_face.c)
+
 # Include directories
 target_include_directories(planet_example PRIVATE src)
 target_include_directories(quadtree_example PRIVATE src)
 target_include_directories(quadtree_mesh PRIVATE src)
 target_include_directories(quadtree_cubic PRIVATE src)
+target_include_directories(quadtree_moon PRIVATE src)
 
 # Link libraries for quadtree_example
 if (UNIX)
     target_link_libraries(quadtree_example PRIVATE m raylib Threads::Threads)
     target_link_libraries(quadtree_mesh PRIVATE m raylib Threads::Threads)
     target_link_libraries(quadtree_cubic PRIVATE m raylib Threads::Threads)
+    target_link_libraries(quadtree_moon PRIVATE m raylib Threads::Threads)
 else()
     target_link_libraries(quadtree_example PRIVATE raylib Threads::Threads)
     target_link_libraries(quadtree_mesh PRIVATE raylib Threads::Threads)
     target_link_libraries(quadtree_cubic PRIVATE raylib Threads::Threads)
+    target_link_libraries(quadtree_moon PRIVATE raylib Threads::Threads)
 endif()
 
 # Link math library on Unix-like systems (not needed on Windows)
@@ -108,6 +119,11 @@ add_custom_command(TARGET quadtree_mesh POST_BUILD
         ${CMAKE_BINARY_DIR}/shaders)
 
 add_custom_command(TARGET quadtree_cubic POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_SOURCE_DIR}/src/shaders
+        ${CMAKE_BINARY_DIR}/shaders)
+
+add_custom_command(TARGET quadtree_moon POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
         ${CMAKE_SOURCE_DIR}/src/shaders
         ${CMAKE_BINARY_DIR}/shaders)
